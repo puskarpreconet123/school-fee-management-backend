@@ -3,30 +3,34 @@
 const nodemailer = require('nodemailer');
 const logger = require('./logger');
 
-let _transporter = null;
+// Cached global transporter (platform SMTP from .env)
+let _globalTransporter = null;
 
-function getTransporter() {
-  if (_transporter) return _transporter;
-
-  _transporter = nodemailer.createTransport({
+function _getGlobalTransporter() {
+  if (_globalTransporter) return _globalTransporter;
+  _globalTransporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: parseInt(process.env.SMTP_PORT || '587'),
-    secure: process.env.SMTP_SECURE === 'true', // true for port 465, false for 587
+    secure: process.env.SMTP_SECURE === 'true',
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
   });
+  return _globalTransporter;
+}
 
-  return _transporter;
+function _createTransporter(cfg) {
+  return nodemailer.createTransport({
+    host: cfg.host,
+    port: cfg.port || 587,
+    secure: cfg.secure || false,
+    auth: { user: cfg.user, pass: cfg.pass },
+  });
 }
 
 /**
- * Send a plain-text + HTML email.
- * @param {string} to       Recipient email
- * @param {string} subject  Subject line
- * @param {string} text     Plain-text body
- * @param {string} [html]   Optional HTML body (falls back to <pre>text</pre>)
+ * Send using the global platform SMTP (env vars).
  */
 async function sendMail({ to, subject, text, html }) {
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
@@ -34,9 +38,7 @@ async function sendMail({ to, subject, text, html }) {
   }
 
   const from = process.env.SMTP_FROM || `FeeSync <${process.env.SMTP_USER}>`;
-  const transporter = getTransporter();
-
-  const info = await transporter.sendMail({
+  const info = await _getGlobalTransporter().sendMail({
     from,
     to,
     subject,
@@ -44,17 +46,61 @@ async function sendMail({ to, subject, text, html }) {
     html: html || `<pre style="font-family:sans-serif">${text}</pre>`,
   });
 
-  logger.info('Email sent', { messageId: info.messageId, to });
+  logger.info('Email sent (platform)', { messageId: info.messageId, to });
   return info;
 }
 
 /**
- * Verify SMTP connection — call on startup or from a health route.
+ * Send using the school's custom SMTP if configured and useCustom is true;
+ * otherwise falls back to the platform (superadmin) SMTP.
+ *
+ * @param {object|null} school  Mongoose school doc with emailConfig field
+ * @param {{ to, subject, text, html? }} opts
+ */
+async function sendMailFromSchool(school, { to, subject, text, html }) {
+  const cfg = school?.emailConfig;
+
+  if (cfg?.useCustom && cfg.host && cfg.user && cfg.pass) {
+    const transporter = _createTransporter(cfg);
+    const from = cfg.from || `${school.name} <${cfg.user}>`;
+
+    const info = await transporter.sendMail({
+      from,
+      to,
+      subject,
+      text,
+      html: html || `<pre style="font-family:sans-serif">${text}</pre>`,
+    });
+
+    logger.info('Email sent (school SMTP)', { messageId: info.messageId, to, school: school._id });
+    return info;
+  }
+
+  // Fall back to platform mail
+  return sendMail({ to, subject, text, html });
+}
+
+/**
+ * Verify a given SMTP config — used by the "test connection" endpoint.
+ * @param {{ host, port, secure, user, pass }} cfg
+ */
+async function verifySmtpConfig(cfg) {
+  try {
+    await _createTransporter(cfg).verify();
+    return { ok: true };
+  } catch (err) {
+    logger.warn('SMTP verify failed', { error: err.message });
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Verify the global platform SMTP — call on startup or from a health route.
  */
 async function verifySmtp() {
   if (!process.env.SMTP_HOST) return { configured: false };
   try {
-    await getTransporter().verify();
+    await _getGlobalTransporter().verify();
     return { configured: true, ok: true };
   } catch (err) {
     logger.warn('SMTP verification failed', { error: err.message });
@@ -62,4 +108,4 @@ async function verifySmtp() {
   }
 }
 
-module.exports = { sendMail, verifySmtp };
+module.exports = { sendMail, sendMailFromSchool, verifySmtp, verifySmtpConfig };

@@ -7,32 +7,75 @@ const { CreditLedgerType } = require('../models/CreditLedger');
 const AppError = require('../utils/AppError');
 const logger = require('../utils/logger');
 
-const CREDIT_COST_PER_RECIPIENT = 0.12;
+// Per-recipient credit cost by channel. Email is free, others reflect
+// approximate provider pricing (1 credit ≈ ₹1).
+const CHANNEL_COSTS = Object.freeze({
+  email: 0,
+  sms: 0.20,
+  whatsapp: 0.50,
+  call: 1.00,
+});
+
+// Channels that have their own credit bucket (email is excluded — it's free).
+const PAID_CHANNELS = Object.freeze(['sms', 'whatsapp', 'call']);
+
+function getChannelCost(channel) {
+  if (!Object.prototype.hasOwnProperty.call(CHANNEL_COSTS, channel)) {
+    throw new AppError(`Unknown channel: ${channel}`, 400);
+  }
+  return CHANNEL_COSTS[channel];
+}
+
+function assertPaidChannel(channel) {
+  if (!PAID_CHANNELS.includes(channel)) {
+    throw new AppError(`Channel "${channel}" does not have a credit balance`, 400);
+  }
+}
+
+function emptyBalances() {
+  return { sms: 0, whatsapp: 0, call: 0 };
+}
+
+function readBalances(school) {
+  // Defensive read — if a legacy doc has no creditBalances yet, treat as zeros.
+  const b = school.creditBalances || {};
+  return {
+    sms: Number(b.sms) || 0,
+    whatsapp: Number(b.whatsapp) || 0,
+    call: Number(b.call) || 0,
+  };
+}
 
 /**
- * Add credits to a school's balance (superadmin action).
+ * Add credits for a specific channel (superadmin action).
  */
-async function topup(schoolId, amount, description, superAdminId) {
+async function topup(schoolId, channel, amount, description, superAdminId) {
+  assertPaidChannel(channel);
   if (!amount || amount <= 0) throw new AppError('Amount must be greater than 0', 400);
 
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
+    const update = { $inc: { [`creditBalances.${channel}`]: amount } };
     const school = await School.findByIdAndUpdate(
       schoolId,
-      { $inc: { creditBalance: amount } },
+      update,
       { new: true, session }
-    ).select('creditBalance name');
+    ).select('creditBalances name');
 
     if (!school) throw new AppError('School not found', 404);
+
+    const balances = readBalances(school);
+    const balanceAfter = balances[channel];
 
     const [entry] = await CreditLedger.create(
       [{
         schoolId,
         type: CreditLedgerType.TOPUP,
         amount,
-        balanceAfter: school.creditBalance,
-        description: description || 'Credit top-up by superadmin',
+        balanceAfter,
+        channel,
+        description: description || `${channel.toUpperCase()} credit top-up by superadmin`,
         createdBy: superAdminId,
         createdByRole: 'superadmin',
       }],
@@ -41,8 +84,8 @@ async function topup(schoolId, amount, description, superAdminId) {
 
     await session.commitTransaction();
 
-    logger.info('Credits topped up', { schoolId, amount, balance: school.creditBalance });
-    return { balance: school.creditBalance, entry };
+    logger.info('Credits topped up', { schoolId, channel, amount, balanceAfter });
+    return { balances, channel, balanceAfter, entry };
   } catch (err) {
     await session.abortTransaction();
     throw err;
@@ -52,28 +95,40 @@ async function topup(schoolId, amount, description, superAdminId) {
 }
 
 /**
- * Deduct credits for a communication blast (admin action).
- * Cost = recipientCount × CREDIT_COST_PER_RECIPIENT
+ * Deduct credits from the channel-specific bucket for a communication blast.
+ * Free channels (email) short-circuit and return cost = 0.
  */
 async function debit(schoolId, recipientCount, channel, description, creatorId, creatorRole = 'admin') {
   if (!recipientCount || recipientCount <= 0) throw new AppError('Recipient count must be > 0', 400);
 
-  const cost = parseFloat((recipientCount * CREDIT_COST_PER_RECIPIENT).toFixed(4));
+  const perRecipient = getChannelCost(channel);
+
+  if (perRecipient === 0) {
+    const school = await School.findById(schoolId).select('creditBalances');
+    if (!school) throw new AppError('School not found', 404);
+    return { balances: readBalances(school), channel, balanceAfter: 0, cost: 0, entry: null };
+  }
+
+  const cost = parseFloat((recipientCount * perRecipient).toFixed(4));
 
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const school = await School.findById(schoolId).select('creditBalance').session(session);
+    const school = await School.findById(schoolId).select('creditBalances').session(session);
     if (!school) throw new AppError('School not found', 404);
 
-    if (school.creditBalance < cost) {
+    const balances = readBalances(school);
+    const available = balances[channel];
+
+    if (available < cost) {
       throw new AppError(
-        `Insufficient credits. Required: ${cost}, Available: ${school.creditBalance.toFixed(4)}`,
+        `Insufficient ${channel.toUpperCase()} credits. Required: ${cost}, Available: ${available.toFixed(4)}`,
         402
       );
     }
 
-    school.creditBalance = parseFloat((school.creditBalance - cost).toFixed(4));
+    const balanceAfter = parseFloat((available - cost).toFixed(4));
+    school.creditBalances[channel] = balanceAfter;
     await school.save({ session });
 
     const [entry] = await CreditLedger.create(
@@ -81,7 +136,7 @@ async function debit(schoolId, recipientCount, channel, description, creatorId, 
         schoolId,
         type: CreditLedgerType.DEBIT,
         amount: cost,
-        balanceAfter: school.creditBalance,
+        balanceAfter,
         channel,
         recipientCount,
         description,
@@ -93,8 +148,8 @@ async function debit(schoolId, recipientCount, channel, description, creatorId, 
 
     await session.commitTransaction();
 
-    logger.info('Credits debited', { schoolId, cost, channel, recipientCount, balance: school.creditBalance });
-    return { balance: school.creditBalance, cost, entry };
+    logger.info('Credits debited', { schoolId, channel, cost, recipientCount, balanceAfter });
+    return { balances: { ...balances, [channel]: balanceAfter }, channel, balanceAfter, cost, entry };
   } catch (err) {
     await session.abortTransaction();
     throw err;
@@ -104,12 +159,12 @@ async function debit(schoolId, recipientCount, channel, description, creatorId, 
 }
 
 /**
- * Get credit balance for a school.
+ * Get per-channel credit balances for a school.
  */
 async function getBalance(schoolId) {
-  const school = await School.findById(schoolId).select('creditBalance name');
+  const school = await School.findById(schoolId).select('creditBalances name');
   if (!school) throw new AppError('School not found', 404);
-  return { balance: school.creditBalance, schoolName: school.name };
+  return { balances: readBalances(school), schoolName: school.name };
 }
 
 /**
@@ -140,16 +195,42 @@ async function getAllBalances({ page = 1, limit = 20, search } = {}) {
     filter.$or = [{ name: re }, { email: re }];
   }
 
-  const [schools, total] = await Promise.all([
+  const [rawSchools, total] = await Promise.all([
     School.find(filter)
-      .select('name email schoolId creditBalance isActive')
-      .sort({ creditBalance: 1, name: 1 })
+      .select('name email schoolId creditBalances isActive')
       .skip(skip)
-      .limit(limit),
+      .limit(limit)
+      .lean(),
     School.countDocuments(filter),
   ]);
+
+  // Normalise creditBalances and sort by total ascending so empties bubble up.
+  const schools = rawSchools
+    .map((s) => ({
+      ...s,
+      creditBalances: {
+        sms: s.creditBalances?.sms ?? 0,
+        whatsapp: s.creditBalances?.whatsapp ?? 0,
+        call: s.creditBalances?.call ?? 0,
+      },
+    }))
+    .sort((a, b) => {
+      const ta = a.creditBalances.sms + a.creditBalances.whatsapp + a.creditBalances.call;
+      const tb = b.creditBalances.sms + b.creditBalances.whatsapp + b.creditBalances.call;
+      return ta - tb || a.name.localeCompare(b.name);
+    });
 
   return { schools, meta: { page, limit, total, pages: Math.ceil(total / limit) } };
 }
 
-module.exports = { topup, debit, getBalance, getLedger, getAllBalances, CREDIT_COST_PER_RECIPIENT };
+module.exports = {
+  topup,
+  debit,
+  getBalance,
+  getLedger,
+  getAllBalances,
+  CHANNEL_COSTS,
+  PAID_CHANNELS,
+  getChannelCost,
+  emptyBalances,
+};

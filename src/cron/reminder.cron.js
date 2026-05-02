@@ -152,13 +152,59 @@ function _buildJobData({ fee, student, school, daysUntilDue, daysOverdue, channe
   };
 }
 
+async function expireStalePendingPayments() {
+  const Payment = require('../models/Payment');
+  const { PaymentStatus } = require('../models/Payment');
+
+  const cutoff = new Date(Date.now() - 15 * 60 * 1000);
+
+  try {
+    const stale = await Payment.find({
+      status: PaymentStatus.PENDING,
+      createdAt: { $lt: cutoff },
+    }).select('_id provider providerOrderId createdAt');
+
+    if (stale.length === 0) return;
+
+    const now = new Date();
+    const bulkOps = stale.map((p) => ({
+      updateOne: {
+        filter: { _id: p._id, status: PaymentStatus.PENDING },
+        update: {
+          $set: { status: PaymentStatus.EXPIRED, expiredAt: now },
+          $push: {
+            attempts: {
+              provider: p.provider,
+              providerOrderId: p.providerOrderId,
+              status: PaymentStatus.EXPIRED,
+              gatewayResponse: { reason: 'sweep-expired', expiredAfterMs: now - p.createdAt },
+              attemptedAt: now,
+            },
+          },
+        },
+      },
+    }));
+
+    const result = await Payment.bulkWrite(bulkOps);
+    logger.info('Payment sweep: expired stale pending payments', {
+      found: stale.length,
+      modified: result.modifiedCount,
+    });
+  } catch (err) {
+    logger.error('Payment sweep failed', { error: err.message });
+  }
+}
+
 function startCronJobs() {
   cron.schedule('0 8 * * *', enqueueFeeReminders, {
     scheduled: true,
     timezone: 'Asia/Kolkata',
   });
 
-  logger.info('Cron jobs registered: fee reminders @ 08:00 IST daily');
+  // Every 5 minutes: expire PENDING payments older than 15 min (safety net)
+  cron.schedule('*/5 * * * *', expireStalePendingPayments);
+
+  logger.info('Cron jobs registered: fee reminders @ 08:00 IST daily | payment sweep every 5 min');
 }
 
 module.exports = { startCronJobs, enqueueFeeReminders };

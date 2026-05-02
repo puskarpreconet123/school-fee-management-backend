@@ -26,7 +26,7 @@ async function getProfile(req, res, next) {
   try {
     const School = require('../models/School');
     const school = await School.findById(req.user.id)
-      .select('-password -paymentProviders.config');
+      .select('-password');
     return sendSuccess(res, { data: school });
   } catch (err) {
     next(err);
@@ -137,8 +137,48 @@ async function updateOverdueRepeatRule(req, res, next) {
   }
 }
 
+async function updateEmailConfig(req, res, next) {
+  try {
+    const School = require('../models/School');
+    const { emailConfig } = req.body;
+
+    const school = await School.findByIdAndUpdate(
+      req.user.id,
+      { $set: { emailConfig } },
+      { new: true, runValidators: false }
+    ).select('emailConfig');
+
+    if (!school) throw new Error('School not found');
+
+    return sendSuccess(res, { message: 'Email settings updated', data: school.emailConfig });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function testEmailConfig(req, res, next) {
+  try {
+    const School = require('../models/School');
+    const { sendMailFromSchool } = require('../utils/mailer');
+
+    const school = await School.findById(req.user.id).select('name email emailConfig');
+    if (!school) throw new Error('School not found');
+
+    await sendMailFromSchool(school, {
+      to: school.email,
+      subject: 'FeeSync — Email Configuration Test',
+      text: `This is a test email from FeeSync.\n\nYour email configuration is working correctly.\n\nSent from: ${school.name}`,
+    });
+
+    return sendSuccess(res, { message: `Test email sent to ${school.email}` });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   register, login, getProfile, getFeeSummary,
   updatePaymentProviders, getPayments,
   updateReminderSettings, updateOverdueRules, updateOverdueRepeatRule,
+  updateEmailConfig, testEmailConfig,
 };

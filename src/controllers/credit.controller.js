@@ -21,15 +21,19 @@ async function listAllBalances(req, res, next) {
 }
 
 // POST /api/v1/superadmin/credits/topup
+// Body: { schoolId, channel: 'sms'|'whatsapp'|'call', amount, description? }
 async function topup(req, res, next) {
   try {
-    const { schoolId, amount, description } = req.body;
-    if (!schoolId || !amount) {
-      return next(new AppError('schoolId and amount are required', 400));
+    const { schoolId, channel, amount, description } = req.body;
+    if (!schoolId || !channel || !amount) {
+      return next(new AppError('schoolId, channel, and amount are required', 400));
     }
-    const result = await creditService.topup(schoolId, Number(amount), description, req.user.id);
+    if (!creditService.PAID_CHANNELS.includes(channel)) {
+      return next(new AppError(`channel must be one of: ${creditService.PAID_CHANNELS.join(', ')}`, 400));
+    }
+    const result = await creditService.topup(schoolId, channel, Number(amount), description, req.user.id);
     return sendCreated(res, {
-      message: `${amount} credits added successfully`,
+      message: `${amount} ${channel.toUpperCase()} credits added successfully`,
       data: result,
     });
   } catch (err) {
@@ -56,7 +60,7 @@ async function getSchoolCredits(req, res, next) {
 
 // ── Admin endpoints ───────────────────────────────────────────────────────────
 
-// GET /api/v1/admin/credits  — own balance + recent ledger
+// GET /api/v1/admin/credits  — own balance + recent ledger + rate card
 async function getMyCredits(req, res, next) {
   try {
     const schoolId = req.user.id; // school admin's id IS the school id
@@ -68,7 +72,9 @@ async function getMyCredits(req, res, next) {
       creditService.getLedger(schoolId, { page, limit }),
     ]);
 
-    return sendSuccess(res, { data: { ...balanceInfo, ...ledger } });
+    return sendSuccess(res, {
+      data: { ...balanceInfo, ...ledger, channelCosts: creditService.CHANNEL_COSTS },
+    });
   } catch (err) {
     next(err);
   }
@@ -102,21 +108,14 @@ async function communicate(req, res, next) {
       return next(new AppError('No active students found for the given selection', 400));
     }
 
-    // Email is free — only debit credits for paid channels (sms, whatsapp, call)
-    let balance, cost;
-    if (channel === 'email') {
-      const balanceInfo = await creditService.getBalance(schoolId);
-      balance = balanceInfo.balance;
-      cost = 0;
-    } else {
-      ({ balance, cost } = await creditService.debit(
-        schoolId,
-        students.length,
-        channel,
-        `${channel.toUpperCase()} blast to ${students.length} students`,
-        req.user.id
-      ));
-    }
+    // debit() handles email (free) and per-channel pricing internally
+    const { balance, cost } = await creditService.debit(
+      schoolId,
+      students.length,
+      channel,
+      `${channel.toUpperCase()} blast to ${students.length} students`,
+      req.user.id
+    );
 
     // Enqueue communication jobs
     const { getCommunicateQueue } = require('../queues/queues');

@@ -275,20 +275,22 @@ async function _enqueuePostPaymentJobs(payment) {
   await Promise.all([
     queue.add('payment-receipt', {
       type: 'payment.receipt',
+      schoolId:     payment.schoolId.toString(),
       studentEmail: student?.email,
-      studentName: student?.name,
-      amount: payment.amount,
-      paymentId: payment.providerPaymentId || payment._id.toString(),
-      feeName: fee?.title,
-      schoolName: school?.name,
+      studentName:  student?.name,
+      amount:       payment.amount,
+      paymentId:    payment.providerPaymentId || payment._id.toString(),
+      feeName:      fee?.title,
+      schoolName:   school?.name,
     }),
     queue.add('admin-notify', {
-      type: 'payment.admin_notify',
+      type:       'payment.admin_notify',
+      schoolId:   payment.schoolId.toString(),
       adminEmail: school?.email,
       schoolName: school?.name,
       studentName: student?.name,
-      amount: payment.amount,
-      paymentId: payment.providerPaymentId || payment._id.toString(),
+      amount:     payment.amount,
+      paymentId:  payment.providerPaymentId || payment._id.toString(),
     }),
   ]);
 }

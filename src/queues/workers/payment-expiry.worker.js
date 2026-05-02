@@ -34,18 +34,19 @@ async function processPaymentExpiryJob(job) {
     return;
   }
 
-  payment.status = PaymentStatus.FAILED;
+  payment.status = PaymentStatus.EXPIRED;
+  payment.expiredAt = new Date();
   payment.addAttempt({
     provider: payment.provider,
     providerOrderId: payment.providerOrderId,
-    status: PaymentStatus.FAILED,
+    status: PaymentStatus.EXPIRED,
     gatewayResponse: { reason: 'expired', expiredAfterMs: ageMs },
     attemptedAt: new Date(),
   });
 
   await payment.save();
 
-  logger.info('Payment marked FAILED due to 15-min expiry', { paymentId, ageMs });
+  logger.info('Payment marked EXPIRED due to 15-min expiry', { paymentId, ageMs });
 }
 
 function startPaymentExpiryWorker() {

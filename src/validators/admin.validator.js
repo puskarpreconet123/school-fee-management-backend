@@ -74,6 +74,18 @@ const updateOverdueRepeatRuleSchema = Joi.object({
   }).allow(null).required(),
 });
 
+const updateEmailConfigSchema = Joi.object({
+  emailConfig: Joi.object({
+    host:      Joi.string().trim().min(1).required(),
+    port:      Joi.number().integer().min(1).max(65535).default(587),
+    secure:    Joi.boolean().default(false),
+    user:      Joi.string().trim().min(1).required(),
+    pass:      Joi.string().min(1).required(),
+    from:      Joi.string().trim().allow('').optional(),
+    useCustom: Joi.boolean().default(true),
+  }).required(),
+});
+
 module.exports = {
   registerSchema,
   loginSchema,
@@ -81,4 +93,5 @@ module.exports = {
   updateReminderRulesSchema,
   updateOverdueRulesSchema,
   updateOverdueRepeatRuleSchema,
+  updateEmailConfigSchema,
 };

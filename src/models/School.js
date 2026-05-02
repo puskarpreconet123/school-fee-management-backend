@@ -74,10 +74,17 @@ const schoolSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
-    creditBalance: {
-      type: Number,
-      default: 0,
-      min: 0,
+    // Per-channel credit balances. Email is free and not stored.
+    creditBalances: {
+      type: new mongoose.Schema(
+        {
+          sms:      { type: Number, default: 0, min: 0 },
+          whatsapp: { type: Number, default: 0, min: 0 },
+          call:     { type: Number, default: 0, min: 0 },
+        },
+        { _id: false }
+      ),
+      default: () => ({ sms: 0, whatsapp: 0, call: 0 }),
     },
     // Each rule: send `timesPerDay` reminders on the day that is `daysBefore` days before due date
     reminderRules: {
@@ -149,6 +156,22 @@ const schoolSchema = new mongoose.Schema(
         message: 'Each overdue rule must have a unique daysAfter value',
       },
     },
+    // School's own SMTP — if useCustom true, mails send from here;
+    // otherwise the platform (superadmin) SMTP from .env is used.
+    emailConfig: {
+      type: {
+        host:      { type: String, trim: true },
+        port:      { type: Number, default: 587 },
+        secure:    { type: Boolean, default: false },
+        user:      { type: String, trim: true },
+        pass:      { type: String },
+        from:      { type: String, trim: true },
+        useCustom: { type: Boolean, default: false },
+      },
+      default: null,
+      _id: false,
+    },
+
     // Repeats every N days after due date until paid or manually stopped
     overdueRepeatRule: {
       type: {

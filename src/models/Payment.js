@@ -6,6 +6,7 @@ const PaymentStatus = Object.freeze({
   PENDING: 'PENDING',
   SUCCESS: 'SUCCESS',
   FAILED: 'FAILED',
+  EXPIRED: 'EXPIRED',
   REFUNDED: 'REFUNDED',
 });
 
@@ -75,6 +76,7 @@ const paymentSchema = new mongoose.Schema(
       default: PaymentStatus.PENDING,
       index: true,
     },
+    expiredAt: { type: Date },
     // Full attempt history
     attempts: {
       type: [attemptSchema],

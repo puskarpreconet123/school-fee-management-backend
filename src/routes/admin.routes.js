@@ -7,7 +7,7 @@ const adminController = require('../controllers/admin.controller');
 const creditController = require('../controllers/credit.controller');
 const { authenticate, authorize } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validate.middleware');
-const { registerSchema, loginSchema, updateProvidersSchema, updateReminderRulesSchema, updateOverdueRulesSchema, updateOverdueRepeatRuleSchema } = require('../validators/admin.validator');
+const { registerSchema, loginSchema, updateProvidersSchema, updateReminderRulesSchema, updateOverdueRulesSchema, updateOverdueRepeatRuleSchema, updateEmailConfigSchema } = require('../validators/admin.validator');
 
 // POST /api/admin/register
 router.post('/register', validate(registerSchema), adminController.register);
@@ -59,6 +59,18 @@ router.patch(
   validate(updateOverdueRepeatRuleSchema),
   adminController.updateOverdueRepeatRule
 );
+
+// PATCH /api/admin/me/email-config
+router.patch(
+  '/me/email-config',
+  authenticate,
+  authorize('admin'),
+  validate(updateEmailConfigSchema),
+  adminController.updateEmailConfig
+);
+
+// POST /api/admin/me/email-config/test
+router.post('/me/email-config/test', authenticate, authorize('admin'), adminController.testEmailConfig);
 
 // Credits & Communications
 router.get('/credits', authenticate, authorize('admin'), creditController.getMyCredits);
