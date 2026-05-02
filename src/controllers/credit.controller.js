@@ -84,54 +84,113 @@ async function getMyCredits(req, res, next) {
 // Body: { channel: 'sms'|'whatsapp'|'call', studentIds: [...] | 'all', message: '...' }
 async function communicate(req, res, next) {
   try {
-    const { channel, studentIds, message } = req.body;
+    const { channels, channel: legacyChannel, message, target, studentIds: legacyStudentIds } = req.body;
     const schoolId = req.user.id;
 
-    if (!['sms', 'whatsapp', 'call', 'email'].includes(channel)) {
-      return next(new AppError('channel must be sms, whatsapp, call, or email', 400));
+    // Normalize channels
+    const activeChannels = Array.isArray(channels) ? channels : (legacyChannel ? [legacyChannel] : []);
+    if (activeChannels.length === 0) {
+      return next(new AppError('At least one channel is required', 400));
     }
+    
     if (!message || !message.trim()) {
       return next(new AppError('message is required', 400));
     }
 
+    // Resolve target
+    const targetType = target?.type || (legacyStudentIds === 'all' ? 'all' : 'student');
+    const targetStudentIds = target?.studentIds || (Array.isArray(legacyStudentIds) ? legacyStudentIds : []);
+    const targetClasses = target?.classes || [];
+
     // Resolve student list
     let students;
-    if (studentIds === 'all') {
+    if (targetType === 'all') {
       students = await Student.find({ schoolId, isActive: true }).select('_id name phone email');
-    } else if (Array.isArray(studentIds) && studentIds.length > 0) {
-      students = await Student.find({ _id: { $in: studentIds }, schoolId, isActive: true }).select('_id name phone email');
+    } else if (targetType === 'class' && targetClasses.length > 0) {
+      students = await Student.find({ schoolId, class: { $in: targetClasses }, isActive: true }).select('_id name phone email');
+    } else if (targetType === 'student' && targetStudentIds.length > 0) {
+      students = await Student.find({ _id: { $in: targetStudentIds }, schoolId, isActive: true }).select('_id name phone email');
     } else {
-      return next(new AppError('studentIds must be "all" or a non-empty array', 400));
+      // Fallback for legacy or incomplete calls
+      if (legacyStudentIds === 'all') {
+        students = await Student.find({ schoolId, isActive: true }).select('_id name phone email');
+      } else if (Array.isArray(legacyStudentIds) && legacyStudentIds.length > 0) {
+        students = await Student.find({ _id: { $in: legacyStudentIds }, schoolId, isActive: true }).select('_id name phone email');
+      } else {
+        return next(new AppError('Invalid targeting criteria', 400));
+      }
     }
 
     if (students.length === 0) {
       return next(new AppError('No active students found for the given selection', 400));
     }
 
-    // debit() handles email (free) and per-channel pricing internally
-    const { balance, cost } = await creditService.debit(
-      schoolId,
-      students.length,
-      channel,
-      `${channel.toUpperCase()} blast to ${students.length} students`,
-      req.user.id
-    );
+    // ── Fetch School Name & Fee Data ──
+    const School = require('../models/School');
+    const school = await School.findById(schoolId).select('name');
 
-    // Enqueue communication jobs
+    const Fee = require('../models/Fee');
+    const pendingFees = await Fee.aggregate([
+      { $match: { studentId: { $in: students.map(s => s._id) }, status: { $in: ['UNPAID', 'OVERDUE', 'PARTIALLY_PAID'] } } },
+      { $group: {
+          _id: '$studentId',
+          totalPending: { $sum: { $subtract: ['$amount', '$paidAmount'] } },
+          earliestDueDate: { $min: '$dueDate' }
+      }}
+    ]);
+    const feeMap = new Map(pendingFees.map(f => [f._id.toString(), f]));
+
+    const results = [];
     const { getCommunicateQueue } = require('../queues/queues');
     const queue = getCommunicateQueue();
-    await queue.add('bulk-communicate', {
-      channel,
-      message: message.trim(),
-      schoolId: schoolId.toString(),
-      students: students.map((s) => ({ id: s._id.toString(), name: s.name, phone: s.phone, email: s.email })),
-    });
 
-    logger.info('Communication blast queued', { schoolId, channel, count: students.length, cost });
+    // ── Scheduling Logic ──
+    let delay = 0;
+    if (req.body.scheduledAt) {
+      const scheduledTime = new Date(req.body.scheduledAt).getTime();
+      const now = Date.now();
+      delay = Math.max(0, scheduledTime - now);
+    }
+
+    for (const ch of activeChannels) {
+      // debit() handles email (free) and per-channel pricing internally
+      const { balance, cost } = await creditService.debit(
+        schoolId,
+        students.length,
+        ch,
+        `${ch.toUpperCase()} blast to ${students.length} students ${delay > 0 ? '(Scheduled)' : ''}`,
+        req.user.id
+      );
+
+      // Enqueue communication jobs
+      await queue.add('bulk-communicate', {
+        channel: ch,
+        message: message.trim(),
+        schoolId: schoolId.toString(),
+        schoolName: school?.name || 'School',
+        students: students.map((s) => {
+          const fee = feeMap.get(s._id.toString());
+          return {
+            id: s._id.toString(),
+            name: s.name,
+            phone: s.phone,
+            email: s.email,
+            amountDue: fee ? fee.totalPending : 0,
+            dueDate: fee ? fee.earliestDueDate : null
+          };
+        }),
+      }, { delay });
+      
+      results.push({ channel: ch, cost, balance });
+    }
+
+    logger.info('Communication blast queued', { schoolId, channels: activeChannels, count: students.length, delay });
 
     return sendCreated(res, {
-      message: `${channel.toUpperCase()} queued for ${students.length} students`,
-      data: { recipientCount: students.length, creditsCost: cost, remainingBalance: balance },
+      message: delay > 0 
+        ? `Communication scheduled successfully for ${new Date(req.body.scheduledAt).toLocaleString()}`
+        : `Communication queued for ${students.length} students across ${activeChannels.length} channel(s)`,
+      data: { recipientCount: students.length, results },
     });
   } catch (err) {
     next(err);

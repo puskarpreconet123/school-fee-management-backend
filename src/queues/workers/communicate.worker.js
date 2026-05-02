@@ -2,6 +2,7 @@
 
 const { Worker } = require('bullmq');
 const { createBullMQConnection } = require('../../config/redis');
+const { env } = require('../../config/env');
 const { sendMailFromSchool } = require('../../utils/mailer');
 const logger = require('../../utils/logger');
 
@@ -33,6 +34,20 @@ function startCommunicateWorker() {
 
       for (const student of students) {
         try {
+          // ── Variable Replacement ──
+          const paymentLink = `${env.urls.frontend}/pay?studentId=${student.id}`;
+          const dueDateStr = student.dueDate ? new Date(student.dueDate).toLocaleDateString('en-IN') : 'N/A';
+          const amountDueStr = `₹${student.amountDue || 0}`;
+          const urgencyLine = student.amountDue > 0 ? 'Please clear your pending dues.' : '';
+
+          const personalizedMsg = message
+            .replace(/{student_name}/g, student.name)
+            .replace(/{amount_due}/g, amountDueStr)
+            .replace(/{school_name}/g, job.data.schoolName || 'School')
+            .replace(/{due_date}/g, dueDateStr)
+            .replace(/{payment_link}/g, paymentLink)
+            .replace(/{urgency_line}/g, urgencyLine);
+
           if (channel === 'email') {
             if (!student.email) {
               logger.warn('Student has no email, skipping', { studentId: student.id });
@@ -41,15 +56,15 @@ function startCommunicateWorker() {
             await sendMailFromSchool(school, {
               to:      student.email,
               subject: `Message from ${school?.name || 'your school'}`,
-              text:    message,
+              text:    personalizedMsg,
             });
             logger.info('Email sent to student', { studentId: student.id, to: student.email });
           } else {
-            // STUB for SMS / WhatsApp / Call — replace with real provider (MSG91, Twilio, etc.)
+            // STUB for SMS / WhatsApp / Call
             logger.info(`[STUB] ${channel.toUpperCase()} sent`, {
               to:      student.phone,
               name:    student.name,
-              preview: message.slice(0, 40),
+              preview: personalizedMsg.slice(0, 40),
             });
           }
         } catch (err) {

@@ -86,11 +86,16 @@ async function getPayments(req, res, next) {
 async function updateReminderSettings(req, res, next) {
   try {
     const School = require('../models/School');
-    const { reminderRules } = req.body;
+    const { reminderRules, reminderMessageTemplate } = req.body;
+    
+    const updatePayload = { reminderRules };
+    if (reminderMessageTemplate !== undefined) {
+      updatePayload.reminderMessageTemplate = reminderMessageTemplate;
+    }
 
     const school = await School.findByIdAndUpdate(
       req.user.id,
-      { $set: { reminderRules } },
+      { $set: updatePayload },
       { new: true, runValidators: true }
     ).select('-password -paymentProviders.config');
 
@@ -98,7 +103,10 @@ async function updateReminderSettings(req, res, next) {
 
     return sendSuccess(res, {
       message: 'Reminder rules updated successfully',
-      data: school.reminderRules,
+      data: {
+        reminderRules: school.reminderRules,
+        reminderMessageTemplate: school.reminderMessageTemplate,
+      },
     });
   } catch (err) {
     next(err);
@@ -108,14 +116,23 @@ async function updateReminderSettings(req, res, next) {
 async function updateOverdueRules(req, res, next) {
   try {
     const School = require('../models/School');
-    const { overdueRules } = req.body;
+    const { overdueRules, reminderMessageTemplate } = req.body;
+    const updatePayload = { overdueRules };
+    if (reminderMessageTemplate !== undefined) updatePayload.reminderMessageTemplate = reminderMessageTemplate;
+    
     const school = await School.findByIdAndUpdate(
       req.user.id,
-      { $set: { overdueRules } },
+      { $set: updatePayload },
       { new: true, runValidators: true }
     ).select('-password -paymentProviders.config');
     if (!school) throw new Error('School not found');
-    return sendSuccess(res, { message: 'Overdue rules updated', data: school.overdueRules });
+    return sendSuccess(res, { 
+      message: 'Overdue rules updated', 
+      data: {
+        overdueRules: school.overdueRules,
+        reminderMessageTemplate: school.reminderMessageTemplate,
+      } 
+    });
   } catch (err) {
     next(err);
   }
@@ -124,14 +141,23 @@ async function updateOverdueRules(req, res, next) {
 async function updateOverdueRepeatRule(req, res, next) {
   try {
     const School = require('../models/School');
-    const { overdueRepeatRule } = req.body;
+    const { overdueRepeatRule, reminderMessageTemplate } = req.body;
+    const updatePayload = { overdueRepeatRule: overdueRepeatRule ?? null };
+    if (reminderMessageTemplate !== undefined) updatePayload.reminderMessageTemplate = reminderMessageTemplate;
+
     const school = await School.findByIdAndUpdate(
       req.user.id,
-      { $set: { overdueRepeatRule: overdueRepeatRule ?? null } },
+      { $set: updatePayload },
       { new: true, runValidators: true }
     ).select('-password -paymentProviders.config');
     if (!school) throw new Error('School not found');
-    return sendSuccess(res, { message: 'Overdue repeat rule updated', data: school.overdueRepeatRule });
+    return sendSuccess(res, { 
+      message: 'Overdue repeat rule updated', 
+      data: {
+        overdueRepeatRule: school.overdueRepeatRule,
+        reminderMessageTemplate: school.reminderMessageTemplate,
+      }
+    });
   } catch (err) {
     next(err);
   }

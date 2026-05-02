@@ -102,16 +102,16 @@ const schoolSchema = new mongoose.Schema(
             min: [1, 'timesPerDay must be at least 1'],
             max: [5, 'timesPerDay cannot exceed 5'],
           },
-          channel: {
-            type: String,
+          channels: {
+            type: [String],
             enum: ['sms', 'whatsapp', 'call', 'email'],
-            default: 'sms',
+            default: ['sms'],
             required: true,
           },
           _id: false,
         },
       ],
-      default: [{ daysBefore: 3, timesPerDay: 1, channel: 'sms' }],
+      default: [{ daysBefore: 3, timesPerDay: 1, channels: ['sms'] }],
       validate: {
         validator(rules) {
           if (!rules || rules.length === 0) return true;
@@ -120,6 +120,12 @@ const schoolSchema = new mongoose.Schema(
         },
         message: 'Each reminder rule must have a unique daysBefore value',
       },
+    },
+    // Custom template for reminder messages
+    reminderMessageTemplate: {
+      type: String,
+      trim: true,
+      default: 'Dear Parent, this is a reminder to pay the pending fee for your child.',
     },
     // Each rule: send `timesPerDay` reminders on the day that is `daysAfter` days past due date
     overdueRules: {
@@ -137,10 +143,10 @@ const schoolSchema = new mongoose.Schema(
             min: [1, 'timesPerDay must be at least 1'],
             max: [5, 'timesPerDay cannot exceed 5'],
           },
-          channel: {
-            type: String,
+          channels: {
+            type: [String],
             enum: ['sms', 'whatsapp', 'call', 'email'],
-            default: 'sms',
+            default: ['sms'],
             required: true,
           },
           _id: false,
@@ -187,10 +193,10 @@ const schoolSchema = new mongoose.Schema(
           min: [1, 'timesPerDay must be at least 1'],
           max: [5, 'timesPerDay cannot exceed 5'],
         },
-        channel: {
-          type: String,
+        channels: {
+          type: [String],
           enum: ['sms', 'whatsapp', 'call', 'email'],
-          default: 'sms',
+          default: ['sms'],
         },
       },
       default: null,

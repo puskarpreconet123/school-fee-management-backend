@@ -54,7 +54,7 @@ async function enqueueFeeReminders() {
 
         let school = schoolCache.get(schoolKey);
         if (!school) {
-          school = await School.findById(fee.schoolId).select('name reminderRules overdueRules overdueRepeatRule');
+          school = await School.findById(fee.schoolId).select('name reminderRules overdueRules overdueRepeatRule reminderMessageTemplate');
           if (!school) { skipped++; continue; }
           schoolCache.set(schoolKey, school);
         }
@@ -72,15 +72,17 @@ async function enqueueFeeReminders() {
           const rule = rules.find((r) => r.daysBefore === daysUntilDue);
           if (!rule) { skipped++; continue; }
 
-          const jobData = _buildJobData({ fee, student, school, daysUntilDue, channel: rule.channel });
+          const jobData = _buildJobData({ fee, student, school, daysUntilDue, channels: rule.channels });
           const spreadMs = rule.timesPerDay > 1 ? (8 * MS_PER_HOUR) / (rule.timesPerDay - 1) : 0;
 
           for (let i = 0; i < rule.timesPerDay; i++) {
-            await queue.add('fee-reminder', jobData, {
-              jobId: `reminder-${fee._id}-d${rule.daysBefore}-${i}-${today}`,
-              delay: Math.round(i * spreadMs),
-            });
-            enqueued++;
+            for (const channel of rule.channels) {
+              await queue.add('fee-reminder', { ...jobData, channel }, {
+                jobId: `reminder-${fee._id}-d${rule.daysBefore}-${channel}-${i}-${today}`,
+                delay: Math.round(i * spreadMs),
+              });
+              enqueued++;
+            }
           }
         } else {
           // ── Post-due (overdue) reminders ───────────────────────────────────
@@ -90,14 +92,16 @@ async function enqueueFeeReminders() {
           // 1. Exact daysAfter rules (always fire regardless of enabled flag)
           const exactRule = (school.overdueRules || []).find((r) => r.daysAfter === daysOverdue);
           if (exactRule) {
-            const jobData = _buildJobData({ fee, student, school, daysUntilDue: 0, daysOverdue, channel: exactRule.channel });
+            const jobData = _buildJobData({ fee, student, school, daysUntilDue: 0, daysOverdue, channels: exactRule.channels });
             const spreadMs = exactRule.timesPerDay > 1 ? (8 * MS_PER_HOUR) / (exactRule.timesPerDay - 1) : 0;
             for (let i = 0; i < exactRule.timesPerDay; i++) {
-              await queue.add('fee-reminder', jobData, {
-                jobId: `overdue-reminder-${fee._id}-a${exactRule.daysAfter}-${i}-${today}`,
-                delay: Math.round(i * spreadMs),
-              });
-              enqueued++;
+              for (const channel of exactRule.channels) {
+                await queue.add('fee-reminder', { ...jobData, channel }, {
+                  jobId: `overdue-reminder-${fee._id}-a${exactRule.daysAfter}-${channel}-${i}-${today}`,
+                  delay: Math.round(i * spreadMs),
+                });
+                enqueued++;
+              }
             }
             firedAny = true;
           }
@@ -105,14 +109,16 @@ async function enqueueFeeReminders() {
           // 2. Continuous repeat rule — fires every N days until paid or stopped
           const repeatRule = school.overdueRepeatRule;
           if (repeatRule && fee.overdueReminderEnabled !== false && daysOverdue % repeatRule.intervalDays === 0) {
-            const jobData = _buildJobData({ fee, student, school, daysUntilDue: 0, daysOverdue, channel: repeatRule.channel });
+            const jobData = _buildJobData({ fee, student, school, daysUntilDue: 0, daysOverdue, channels: repeatRule.channels });
             const spreadMs = repeatRule.timesPerDay > 1 ? (8 * MS_PER_HOUR) / (repeatRule.timesPerDay - 1) : 0;
             for (let i = 0; i < repeatRule.timesPerDay; i++) {
-              await queue.add('fee-reminder', jobData, {
-                jobId: `overdue-repeat-${fee._id}-${i}-${today}`,
-                delay: Math.round(i * spreadMs),
-              });
-              enqueued++;
+              for (const channel of repeatRule.channels) {
+                await queue.add('fee-reminder', { ...jobData, channel }, {
+                  jobId: `overdue-repeat-${fee._id}-${channel}-${i}-${today}`,
+                  delay: Math.round(i * spreadMs),
+                });
+                enqueued++;
+              }
             }
             firedAny = true;
           }
@@ -133,22 +139,22 @@ async function enqueueFeeReminders() {
   }
 }
 
-function _buildJobData({ fee, student, school, daysUntilDue, daysOverdue, channel }) {
+function _buildJobData({ fee, student, school, daysUntilDue, daysOverdue, channels }) {
   return {
-    feeId:           fee._id.toString(),
-    studentId:       student._id.toString(),
-    studentIdString: student.studentId,
-    studentName:     student.name,
-    studentEmail:    student.email,
-    studentPhone:    student.phone,
-    schoolName:      school.name,
-    schoolId:        fee.schoolId.toString(),
-    amount:          fee.amount,
-    feeName:         fee.title,
-    dueDate:         fee.dueDate.toISOString(),
-    daysUntilDue:    Math.max(daysUntilDue, 0),
-    daysOverdue:     daysOverdue || 0,
-    channel:         channel || 'sms',
+    feeId:                    fee._id.toString(),
+    studentId:                student._id.toString(),
+    studentIdString:          student.studentId,
+    studentName:              student.name,
+    studentEmail:             student.email,
+    studentPhone:             student.phone,
+    schoolName:               school.name,
+    schoolId:                 fee.schoolId.toString(),
+    amount:                   fee.amount,
+    feeName:                  fee.title,
+    dueDate:                  fee.dueDate.toISOString(),
+    daysUntilDue:             Math.max(daysUntilDue, 0),
+    daysOverdue:              daysOverdue || 0,
+    reminderMessageTemplate: school.reminderMessageTemplate,
   };
 }
 

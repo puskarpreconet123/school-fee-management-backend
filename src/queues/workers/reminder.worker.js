@@ -48,14 +48,14 @@ async function processReminderJob(job) {
     urgencyLine = `You have ${daysUntilDue} day(s) remaining.`;
   }
 
-  const text = [
-    `Dear ${studentName},`,
-    daysOverdue > 0
-      ? `Your fee of ₹${amount} for ${schoolName} was due on ${dueDateStr}.`
-      : `This is a reminder that your fee of ₹${amount} for ${schoolName} is due on ${dueDateStr}.`,
-    urgencyLine,
-    `Pay here: ${paymentLink}`,
-  ].join('\n\n');
+  const template = job.data.reminderMessageTemplate || 'Dear {student_name}, this is a reminder to pay the pending fee for your child.';
+  const text = template
+    .replace(/{student_name}/g, studentName)
+    .replace(/{amount_due}/g, `₹${amount}`)
+    .replace(/{school_name}/g, schoolName)
+    .replace(/{due_date}/g, dueDateStr)
+    .replace(/{payment_link}/g, paymentLink)
+    .replace(/{urgency_line}/g, urgencyLine);
 
   // 3. Dispatch based on channel
   if (channel === 'email' && studentEmail) {

@@ -31,7 +31,7 @@ const loginSchema = Joi.object({
 const reminderRuleSchema = Joi.object({
   daysBefore: Joi.number().integer().min(0).max(60).required(),
   timesPerDay: Joi.number().integer().min(1).max(5).required(),
-  channel: Joi.string().valid('sms', 'whatsapp', 'call', 'email').default('sms'),
+  channels: Joi.array().items(Joi.string().valid('sms', 'whatsapp', 'call', 'email')).min(1).required(),
 });
 
 const updateReminderRulesSchema = Joi.object({
@@ -46,12 +46,13 @@ const updateReminderRulesSchema = Joi.object({
       'array.max': 'Cannot have more than 10 reminder rules',
       'array.unique': 'Each rule must have a unique "days before due date" value',
     }),
+  reminderMessageTemplate: Joi.string().trim().allow('').optional(),
 });
 
 const overdueRuleSchema = Joi.object({
   daysAfter: Joi.number().integer().min(1).max(180).required(),
   timesPerDay: Joi.number().integer().min(1).max(5).required(),
-  channel: Joi.string().valid('sms', 'whatsapp', 'call', 'email').default('sms'),
+  channels: Joi.array().items(Joi.string().valid('sms', 'whatsapp', 'call', 'email')).min(1).required(),
 });
 
 const updateOverdueRulesSchema = Joi.object({
@@ -64,14 +65,16 @@ const updateOverdueRulesSchema = Joi.object({
       'array.max': 'Cannot have more than 10 overdue rules',
       'array.unique': 'Each rule must have a unique "days after due date" value',
     }),
+  reminderMessageTemplate: Joi.string().trim().allow('').optional(),
 });
 
 const updateOverdueRepeatRuleSchema = Joi.object({
   overdueRepeatRule: Joi.object({
     intervalDays: Joi.number().integer().min(1).max(30).required(),
     timesPerDay: Joi.number().integer().min(1).max(5).required(),
-    channel: Joi.string().valid('sms', 'whatsapp', 'call', 'email').default('sms'),
+    channels: Joi.array().items(Joi.string().valid('sms', 'whatsapp', 'call', 'email')).min(1).required(),
   }).allow(null).required(),
+  reminderMessageTemplate: Joi.string().trim().allow('').optional(),
 });
 
 const updateEmailConfigSchema = Joi.object({
