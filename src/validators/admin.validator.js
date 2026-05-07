@@ -89,6 +89,30 @@ const updateEmailConfigSchema = Joi.object({
   }).required(),
 });
 
+const updateWhatsappConfigSchema = Joi.object({
+  whatsappConfig: Joi.object({
+    apiUrl:    Joi.string().uri().trim().required(),
+    channelId: Joi.string().trim().required(),
+    apiKey:    Joi.string().trim().required(),
+    wabaId:    Joi.string().trim().required(),
+    apiVersion: Joi.string().trim().required(),
+    useCustom: Joi.boolean().default(true),
+  }).required(),
+});
+
+const whatsappTemplateSchema = Joi.object({
+  name: Joi.string().trim().required(),
+  category: Joi.string().valid('MARKETING', 'UTILITY', 'AUTHENTICATION').default('MARKETING'),
+  language: Joi.string().default('en'),
+  header: Joi.object({
+    type: Joi.string().valid('TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT', 'NONE').default('NONE'),
+    text: Joi.string().trim().allow('').optional(),
+  }).optional(),
+  body: Joi.string().trim().required(),
+  footer: Joi.string().trim().allow('').optional(),
+  buttons: Joi.array().items(Joi.any()).optional(),
+});
+
 module.exports = {
   registerSchema,
   loginSchema,
@@ -97,4 +121,6 @@ module.exports = {
   updateOverdueRulesSchema,
   updateOverdueRepeatRuleSchema,
   updateEmailConfigSchema,
+  updateWhatsappConfigSchema,
+  whatsappTemplateSchema,
 };

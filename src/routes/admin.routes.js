@@ -7,7 +7,17 @@ const adminController = require('../controllers/admin.controller');
 const creditController = require('../controllers/credit.controller');
 const { authenticate, authorize } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validate.middleware');
-const { registerSchema, loginSchema, updateProvidersSchema, updateReminderRulesSchema, updateOverdueRulesSchema, updateOverdueRepeatRuleSchema, updateEmailConfigSchema } = require('../validators/admin.validator');
+const { 
+  registerSchema, 
+  loginSchema, 
+  updateProvidersSchema, 
+  updateReminderRulesSchema, 
+  updateOverdueRulesSchema, 
+  updateOverdueRepeatRuleSchema, 
+  updateEmailConfigSchema, 
+  updateWhatsappConfigSchema,
+  whatsappTemplateSchema
+} = require('../validators/admin.validator');
 
 // POST /api/admin/register
 router.post('/register', validate(registerSchema), adminController.register);
@@ -71,6 +81,46 @@ router.patch(
 
 // POST /api/admin/me/email-config/test
 router.post('/me/email-config/test', authenticate, authorize('admin'), adminController.testEmailConfig);
+
+// PATCH /api/admin/me/whatsapp-config
+router.patch(
+  '/me/whatsapp-config',
+  authenticate,
+  authorize('admin'),
+  validate(updateWhatsappConfigSchema),
+  adminController.updateWhatsappConfig
+);
+
+// WhatsApp Template Routes
+router.get(
+  '/me/whatsapp-templates',
+  authenticate,
+  authorize('admin'),
+  adminController.getWhatsappTemplates
+);
+
+router.post(
+  '/me/whatsapp-templates',
+  authenticate,
+  authorize('admin'),
+  validate(whatsappTemplateSchema),
+  adminController.createWhatsappTemplate
+);
+
+router.patch(
+  '/me/whatsapp-templates/:id',
+  authenticate,
+  authorize('admin'),
+  validate(whatsappTemplateSchema),
+  adminController.updateWhatsappTemplate
+);
+
+router.delete(
+  '/me/whatsapp-templates/:id',
+  authenticate,
+  authorize('admin'),
+  adminController.deleteWhatsappTemplate
+);
 
 // Credits & Communications
 router.get('/credits', authenticate, authorize('admin'), creditController.getMyCredits);

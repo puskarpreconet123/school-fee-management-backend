@@ -3,6 +3,7 @@
 const authService = require('../services/auth.service');
 const feeService = require('../services/fee.service');
 const { sendSuccess, sendCreated } = require('../utils/response');
+const whatsappUtils = require('../utils/whatsapp');
 
 async function register(req, res, next) {
   try {
@@ -27,7 +28,25 @@ async function getProfile(req, res, next) {
     const School = require('../models/School');
     const school = await School.findById(req.user.id)
       .select('-password');
-    return sendSuccess(res, { data: school });
+    
+    const whatsappDefaults = {
+      apiVersion: process.env.WHATSAPP_DEFAULT_API_VERSION || 'v20.0',
+      wabaId: process.env.WHATSAPP_DEFAULT_WABA_ID || '',
+      apiUrl: process.env.WHATSAPP_DEFAULT_API_URL || 'https://api.brandmo.ai/crm/campaign',
+      channelId: process.env.WHATSAPP_DEFAULT_CHANNEL_ID || '',
+      apiKey: process.env.WHATSAPP_DEFAULT_API_KEY || '',
+    };
+
+    const emailDefaults = {
+      host: process.env.SMTP_HOST || '',
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      secure: process.env.SMTP_SECURE === 'true',
+      user: process.env.SMTP_USER || '',
+      pass: process.env.SMTP_PASS || '',
+      from: process.env.SMTP_FROM || '',
+    };
+
+    return sendSuccess(res, { data: { ...school.toObject(), whatsappDefaults, emailDefaults } });
   } catch (err) {
     next(err);
   }
@@ -202,9 +221,99 @@ async function testEmailConfig(req, res, next) {
   }
 }
 
+async function updateWhatsappConfig(req, res, next) {
+  try {
+    const School = require('../models/School');
+    const { whatsappConfig } = req.body;
+
+    const school = await School.findByIdAndUpdate(
+      req.user.id,
+      { $set: { whatsappConfig } },
+      { new: true, runValidators: true }
+    ).select('whatsappConfig');
+
+    if (!school) throw new Error('School not found');
+
+    return sendSuccess(res, { message: 'WhatsApp settings updated', data: school.whatsappConfig });
+  } catch (err) {
+    next(err);
+  }
+}
+async function createWhatsappTemplate(req, res, next) {
+  try {
+    const school = await authService.getSchoolById(req.user.id);
+    const apiResult = await whatsappUtils.createWhatsappTemplate(school, req.body);
+    
+    school.whatsappTemplates.push({
+      ...req.body,
+      templateId: apiResult.id,
+      status: apiResult.status || 'PENDING'
+    });
+    await school.save();
+
+    return sendCreated(res, { message: 'WhatsApp template created successfully', data: apiResult });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function updateWhatsappTemplate(req, res, next) {
+  try {
+    const school = await authService.getSchoolById(req.user.id);
+    const template = school.whatsappTemplates.id(req.params.id);
+    if (!template) return res.status(404).json({ message: 'Template not found' });
+
+    const apiResult = await whatsappUtils.updateWhatsappTemplate(school, template.templateId, req.body);
+    
+    Object.assign(template, req.body);
+    await school.save();
+
+    return sendSuccess(res, { message: 'WhatsApp template updated successfully', data: apiResult });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function deleteWhatsappTemplate(req, res, next) {
+  try {
+    const school = await authService.getSchoolById(req.user.id);
+    const template = school.whatsappTemplates.id(req.params.id);
+    if (!template) return res.status(404).json({ message: 'Template not found' });
+
+    await whatsappUtils.deleteWhatsappTemplate(school, template.name);
+    
+    school.whatsappTemplates.pull(req.params.id);
+    await school.save();
+
+    return sendSuccess(res, { message: 'WhatsApp template deleted successfully' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getWhatsappTemplates(req, res, next) {
+  try {
+    const school = await authService.getSchoolById(req.user.id);
+    const { limit, offset } = req.query;
+    const apiResult = await whatsappUtils.getWhatsappTemplates(school, limit, offset);
+    return sendSuccess(res, { data: apiResult });
+  } catch (err) {
+    console.error('WhatsApp API Error:', err.response?.data || err.message);
+    if (err.response?.status === 400 || err.response?.status === 401) {
+      return res.status(err.response.status).json({ 
+        success: false, 
+        message: err.response.data?.error?.message || 'WhatsApp API configuration error' 
+      });
+    }
+    next(err);
+  }
+}
+
 module.exports = {
   register, login, getProfile, getFeeSummary,
   updatePaymentProviders, getPayments,
   updateReminderSettings, updateOverdueRules, updateOverdueRepeatRule,
   updateEmailConfig, testEmailConfig,
+  updateWhatsappConfig,
+  createWhatsappTemplate, updateWhatsappTemplate, deleteWhatsappTemplate, getWhatsappTemplates,
 };

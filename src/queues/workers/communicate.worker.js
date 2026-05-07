@@ -4,6 +4,7 @@ const { Worker } = require('bullmq');
 const { createBullMQConnection } = require('../../config/redis');
 const { env } = require('../../config/env');
 const { sendMailFromSchool } = require('../../utils/mailer');
+const { sendWhatsappFromSchool } = require('../../utils/whatsapp');
 const logger = require('../../utils/logger');
 
 /**
@@ -25,11 +26,11 @@ function startCommunicateWorker() {
         jobId: job.id, channel, schoolId, recipientCount: students.length,
       });
 
-      // Load school once for email config resolution
+      // Load school once for config resolution
       let school = null;
-      if (channel === 'email' && schoolId) {
+      if (['email', 'whatsapp'].includes(channel) && schoolId) {
         const School = require('../../models/School');
-        school = await School.findById(schoolId).select('name emailConfig');
+        school = await School.findById(schoolId).select('name emailConfig whatsappConfig');
       }
 
       for (const student of students) {
@@ -59,8 +60,19 @@ function startCommunicateWorker() {
               text:    personalizedMsg,
             });
             logger.info('Email sent to student', { studentId: student.id, to: student.email });
+          } else if (channel === 'whatsapp') {
+            if (!student.phone) {
+              logger.warn('Student has no phone number, skipping', { studentId: student.id });
+              continue;
+            }
+            await sendWhatsappFromSchool(school, {
+              to: student.phone,
+              message: personalizedMsg,
+              studentName: student.name
+            });
+            logger.info('WhatsApp sent to student', { studentId: student.id, to: student.phone });
           } else {
-            // STUB for SMS / WhatsApp / Call
+            // STUB for SMS / Call
             logger.info(`[STUB] ${channel.toUpperCase()} sent`, {
               to:      student.phone,
               name:    student.name,

@@ -107,4 +107,10 @@ async function loginSuperAdmin({ email, password }) {
   return { token, admin: { _id: admin._id, name: admin.name, email: admin.email } };
 }
 
-module.exports = { registerSchool, loginSchool, loginStudent, loginSuperAdmin };
+async function getSchoolById(id) {
+  const school = await School.findById(id);
+  if (!school) throw new AppError('School not found', 404);
+  return school;
+}
+
+module.exports = { registerSchool, loginSchool, loginStudent, loginSuperAdmin, getSchoolById };

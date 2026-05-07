@@ -78,9 +78,9 @@ const schoolSchema = new mongoose.Schema(
     creditBalances: {
       type: new mongoose.Schema(
         {
-          sms:      { type: Number, default: 0, min: 0 },
+          sms: { type: Number, default: 0, min: 0 },
           whatsapp: { type: Number, default: 0, min: 0 },
-          call:     { type: Number, default: 0, min: 0 },
+          call: { type: Number, default: 0, min: 0 },
         },
         { _id: false }
       ),
@@ -166,16 +166,49 @@ const schoolSchema = new mongoose.Schema(
     // otherwise the platform (superadmin) SMTP from .env is used.
     emailConfig: {
       type: {
-        host:      { type: String, trim: true },
-        port:      { type: Number, default: 587 },
-        secure:    { type: Boolean, default: false },
-        user:      { type: String, trim: true },
-        pass:      { type: String },
-        from:      { type: String, trim: true },
+        host: { type: String, trim: true },
+        port: { type: Number, default: 587 },
+        secure: { type: Boolean, default: false },
+        user: { type: String, trim: true },
+        pass: { type: String },
+        from: { type: String, trim: true },
         useCustom: { type: Boolean, default: false },
       },
       default: null,
       _id: false,
+    },
+
+    whatsappConfig: {
+      type: {
+        apiUrl: { type: String, trim: true },
+        channelId: { type: String, trim: true },
+        apiKey: { type: String, trim: true },
+        wabaId: { type: String, trim: true },
+        apiVersion: { type: String, trim: true },
+        useCustom: { type: Boolean, default: false },
+      },
+      default: null,
+      _id: false,
+    },
+    
+    whatsappTemplates: {
+      type: [
+        {
+          templateId: { type: String }, // External ID from Meta/Brandmo
+          name: { type: String, required: true },
+          category: { type: String, default: 'MARKETING' },
+          language: { type: String, default: 'en' },
+          header: {
+            type: { type: String, enum: ['TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT', 'NONE'], default: 'NONE' },
+            text: { type: String },
+          },
+          body: { type: String, required: true },
+          footer: { type: String },
+          buttons: { type: [mongoose.Schema.Types.Mixed] },
+          status: { type: String, default: 'PENDING' },
+        }
+      ],
+      default: []
     },
 
     // Repeats every N days after due date until paid or manually stopped
