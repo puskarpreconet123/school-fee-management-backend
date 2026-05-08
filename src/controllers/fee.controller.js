@@ -28,9 +28,9 @@ async function listForSchool(req, res, next) {
 
 async function listForStudent(req, res, next) {
   try {
-    // Admin can view any student in their school; student can only view their own
+    // Admin can view any student in their school; student can only view their own in their school
     const targetStudentId = req.params.studentId || req.user.id;
-    const schoolId = req.user.role === 'admin' ? req.user.id : null;
+    const schoolId = req.user.role === 'admin' ? req.user.id : req.user.schoolId;
 
     const result = await feeService.getFeesForStudent(schoolId, targetStudentId, {
       page: req.query.page,

@@ -9,6 +9,7 @@ const SchoolPayment = require('../models/SchoolPayment');
 const AppError = require('../utils/AppError');
 const { sendSuccess, sendCreated } = require('../utils/response');
 const logger = require('../utils/logger');
+const crypto = require('crypto');
 
 // POST /api/superadmin/login
 async function login(req, res, next) {
@@ -264,6 +265,32 @@ async function createPayment(req, res, next) {
   }
 }
 
+// POST /api/superadmin/schools/:id/reset-password
+async function resetSchoolPassword(req, res, next) {
+  try {
+    const school = await School.findById(req.params.id);
+    if (!school) throw new AppError('School not found', 404);
+
+    const newPassword = crypto.randomBytes(4).toString('hex');
+    school.password = newPassword;
+    school.tempPassword = newPassword;
+    school.mustChangePassword = true;
+    await school.save();
+
+    logger.info('School password reset by superadmin', { 
+      schoolId: school._id, 
+      adminId: req.user.id 
+    });
+
+    return sendSuccess(res, { 
+      message: 'Password reset successful', 
+      data: { _id: school._id, name: school.name, tempPassword: newPassword } 
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   login,
   getProfile,
@@ -276,4 +303,5 @@ module.exports = {
   getGlobalSummary,
   listPayments,
   createPayment,
+  resetSchoolPassword,
 };

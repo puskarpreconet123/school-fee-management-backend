@@ -29,9 +29,9 @@ async function enqueueFeeReminders() {
   const today = now.toISOString().slice(0, 10);
 
   try {
-    // Auto-mark overdue fees
+    // Auto-mark overdue fees (Unpaid or Partially Paid past due date)
     await Fee.updateMany(
-      { status: 'UNPAID', dueDate: { $lt: now } },
+      { status: { $in: ['UNPAID', 'PARTIALLY_PAID'] }, dueDate: { $lt: now } },
       { $set: { status: 'OVERDUE' } }
     );
 

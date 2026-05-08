@@ -28,6 +28,9 @@ router.post('/login', validate(loginSchema), adminController.login);
 // GET /api/admin/me  (protected)
 router.get('/me', authenticate, authorize('admin'), adminController.getProfile);
 
+// PATCH /api/admin/me/change-password
+router.patch('/me/change-password', authenticate, authorize('admin'), adminController.changePassword);
+
 // GET /api/admin/summary  (protected)
 router.get('/summary', authenticate, authorize('admin'), adminController.getFeeSummary);
 

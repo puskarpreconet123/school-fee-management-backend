@@ -65,9 +65,11 @@ async function createOrder({ studentId, feeId, providerType }) {
 
   // ── Create gateway order ──────────────────────────────────────────────────
   const receipt = `fee-${feeId}-${uuidv4().slice(0, 8)}`;
+  const remainingAmount = fee.amount - (fee.paidAmount || 0);
+  const amountInPaise = Math.round(remainingAmount * 100);
 
   const { orderId, providerData } = await provider.createOrder({
-    amount: fee.amountInPaise || Math.round(fee.amount * 100),
+    amount: amountInPaise,
     currency: fee.currency || 'INR',
     receipt,
     notes: {
@@ -82,8 +84,8 @@ async function createOrder({ studentId, feeId, providerType }) {
     schoolId: school._id,
     studentId,
     feeId,
-    amount: fee.amount,
-    amountInPaise: fee.amountInPaise || Math.round(fee.amount * 100),
+    amount: remainingAmount,
+    amountInPaise: amountInPaise,
     currency: fee.currency || 'INR',
     provider: providerType,
     providerOrderId: orderId,
@@ -242,14 +244,26 @@ async function _finalizePayment(payment, gatewayPaymentId, meta = {}) {
 
     await payment.save({ session });
 
+    const fee = await Fee.findById(payment.feeId).session(session);
+    if (!fee) throw new Error('Fee not found during finalization');
+
+    const totalPaidSoFar = (fee.paidAmount || 0) + payment.amount;
+    const isFullyPaid = totalPaidSoFar >= fee.amount;
+
     await Fee.findByIdAndUpdate(
       payment.feeId,
-      { $set: { status: FeeStatus.PAID, paidAt: new Date(), paidAmount: payment.amount } },
+      { 
+        $set: { 
+          status: isFullyPaid ? FeeStatus.PAID : FeeStatus.PARTIALLY_PAID, 
+          paidAt: isFullyPaid ? new Date() : undefined 
+        },
+        $inc: { paidAmount: payment.amount }
+      },
       { session }
     );
 
     await session.commitTransaction();
-    logger.info('Payment finalized', { paymentId: payment._id, gatewayPaymentId });
+    logger.info('Payment finalized', { paymentId: payment._id, gatewayPaymentId, status: isFullyPaid ? 'PAID' : 'PARTIALLY_PAID' });
 
     // ── Enqueue post-payment notifications ───────────────────────────────────
     await _enqueuePostPaymentJobs(payment).catch((err) =>

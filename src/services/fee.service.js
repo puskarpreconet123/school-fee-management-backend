@@ -1,5 +1,6 @@
 'use strict';
 
+const mongoose = require('mongoose');
 const Fee = require('../models/Fee');
 const { FeeStatus } = require('../models/Fee');
 const Student = require('../models/Student');
@@ -107,6 +108,9 @@ async function getFeesForStudent(schoolId, studentId, { page = 1, limit = 20, st
 }
 
 async function getFeesForSchool(schoolId, { page = 1, limit = 20, status } = {}) {
+  // Proactively mark overdue fees for this school
+  await _markOverdue(schoolId);
+
   const filter = { schoolId };
   if (status) filter.status = status;
 
@@ -114,10 +118,10 @@ async function getFeesForSchool(schoolId, { page = 1, limit = 20, status } = {})
 
   const [fees, total] = await Promise.all([
     Fee.find(filter)
-      .populate('studentId', 'name class section rollNumber')
+      .populate('studentId', 'name studentId class section')
+      .sort({ dueDate: 1 })
       .skip(skip)
-      .limit(limit)
-      .sort({ createdAt: -1 }),
+      .limit(Number(limit)),
     Fee.countDocuments(filter),
   ]);
 
@@ -152,6 +156,9 @@ async function updateFeeStatus(feeId, status, extra = {}) {
 }
 
 async function getFeesSummary(schoolId) {
+  // Proactively mark overdue fees before calculating summary
+  await _markOverdue(schoolId);
+
   const [total, paid, unpaid, overdue] = await Promise.all([
     Fee.countDocuments({ schoolId }),
     Fee.countDocuments({ schoolId, status: FeeStatus.PAID }),
@@ -160,7 +167,7 @@ async function getFeesSummary(schoolId) {
   ]);
 
   const collected = await Fee.aggregate([
-    { $match: { schoolId, status: FeeStatus.PAID } },
+    { $match: { schoolId: new mongoose.Types.ObjectId(schoolId), status: FeeStatus.PAID } },
     { $group: { _id: null, total: { $sum: '$amount' } } },
   ]);
 
@@ -173,4 +180,23 @@ async function getFeesSummary(schoolId) {
   };
 }
 
-module.exports = { createFee, getFeesForStudent, getFeesForSchool, getFeeById, updateFeeStatus, getFeesSummary };
+async function _markOverdue(schoolId) {
+  const now = new Date();
+  await Fee.updateMany(
+    { 
+      schoolId, 
+      status: { $in: [FeeStatus.UNPAID, FeeStatus.PARTIALLY_PAID] }, 
+      dueDate: { $lt: now } 
+    },
+    { $set: { status: FeeStatus.OVERDUE } }
+  );
+}
+
+module.exports = {
+  createFee,
+  getFeesForStudent,
+  getFeesForSchool,
+  getFeeById,
+  updateFeeStatus,
+  getFeesSummary,
+};

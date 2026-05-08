@@ -37,7 +37,6 @@ const reminderRuleSchema = Joi.object({
 const updateReminderRulesSchema = Joi.object({
   reminderRules: Joi.array()
     .items(reminderRuleSchema)
-    .min(1)
     .max(10)
     .unique('daysBefore')
     .required()

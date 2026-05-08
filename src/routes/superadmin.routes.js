@@ -24,6 +24,7 @@ router.post('/schools', c.createSchool);
 router.get('/schools/:id', c.getSchool);
 router.patch('/schools/:id', c.updateSchool);
 router.patch('/schools/:id/status', c.toggleSchoolStatus);
+router.post('/schools/:id/reset-password', c.resetSchoolPassword);
 router.delete('/schools/:id', c.deleteSchool);
 
 // Subscriptions / Payments

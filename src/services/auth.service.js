@@ -20,7 +20,10 @@ async function registerSchool(data) {
   const existing = await School.findOne({ email });
   if (existing) throw new AppError('A school with this email already exists', 409);
 
-  const school = await School.create({ name, email, password, phone, address, paymentProviders });
+  const school = await School.create({ 
+    name, email, password, phone, address, paymentProviders,
+    mustChangePassword: false 
+  });
 
   logger.info('School registered', { schoolId: school._id, email });
 
@@ -47,8 +50,25 @@ async function loginSchool({ email, password }) {
       name: school.name,
       email: school.email,
       paymentProviders: school.getActiveProviderTypes(),
+      mustChangePassword: school.mustChangePassword,
+      tempPassword: school.tempPassword,
     },
   };
+}
+
+async function changeSchoolPassword(schoolId, { currentPassword, newPassword }) {
+  const school = await School.findById(schoolId).select('+password');
+  if (!school) throw new AppError('School not found', 404);
+
+  const isMatch = await school.comparePassword(currentPassword);
+  if (!isMatch) throw new AppError('Current password is incorrect', 401);
+
+  school.password = newPassword;
+  school.tempPassword = undefined; // Clear cleartext password
+  school.mustChangePassword = false;
+  await school.save();
+
+  logger.info('School changed password', { schoolId });
 }
 
 // ─── Student Auth ─────────────────────────────────────────────────────────────
@@ -113,4 +133,4 @@ async function getSchoolById(id) {
   return school;
 }
 
-module.exports = { registerSchool, loginSchool, loginStudent, loginSuperAdmin, getSchoolById };
+module.exports = { registerSchool, loginSchool, loginStudent, loginSuperAdmin, getSchoolById, changeSchoolPassword };

@@ -236,6 +236,14 @@ const schoolSchema = new mongoose.Schema(
       default: null,
       _id: false,
     },
+    mustChangePassword: {
+      type: Boolean,
+      default: true,
+    },
+    tempPassword: {
+      type: String,
+      trim: true,
+    },
   },
   {
     timestamps: true,

@@ -360,6 +360,15 @@ async function getWhatsappTemplates(req, res, next) {
   }
 }
 
+async function changePassword(req, res, next) {
+  try {
+    await authService.changeSchoolPassword(req.user.id, req.body);
+    return sendSuccess(res, { message: 'Password changed successfully' });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   register, login, getProfile, getFeeSummary,
   updatePaymentProviders, getPayments,
@@ -367,4 +376,5 @@ module.exports = {
   updateEmailConfig, testEmailConfig,
   updateWhatsappConfig,
   createWhatsappTemplate, updateWhatsappTemplate, deleteWhatsappTemplate, getWhatsappTemplates, syncWhatsappTemplates,
+  changePassword,
 };
