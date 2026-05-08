@@ -100,6 +100,13 @@ router.get(
 );
 
 router.post(
+  '/me/whatsapp-templates/sync',
+  authenticate,
+  authorize('admin'),
+  adminController.syncWhatsappTemplates
+);
+
+router.post(
   '/me/whatsapp-templates',
   authenticate,
   authorize('admin'),

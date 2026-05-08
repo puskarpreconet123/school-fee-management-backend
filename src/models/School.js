@@ -183,6 +183,7 @@ const schoolSchema = new mongoose.Schema(
         apiUrl: { type: String, trim: true },
         channelId: { type: String, trim: true },
         apiKey: { type: String, trim: true },
+        accessToken: { type: String, trim: true },
         wabaId: { type: String, trim: true },
         apiVersion: { type: String, trim: true },
         useCustom: { type: Boolean, default: false },

@@ -35,6 +35,7 @@ async function getProfile(req, res, next) {
       apiUrl: process.env.WHATSAPP_DEFAULT_API_URL || 'https://api.brandmo.ai/crm/campaign',
       channelId: process.env.WHATSAPP_DEFAULT_CHANNEL_ID || '',
       apiKey: process.env.WHATSAPP_DEFAULT_API_KEY || '',
+      accessToken: process.env.WHATSAPP_DEFAULT_ACCESS_TOKEN || '',
     };
 
     const emailDefaults = {
@@ -260,7 +261,8 @@ async function createWhatsappTemplate(req, res, next) {
 async function updateWhatsappTemplate(req, res, next) {
   try {
     const school = await authService.getSchoolById(req.user.id);
-    const template = school.whatsappTemplates.id(req.params.id);
+    // Find by Mongo _id OR Meta templateId
+    const template = school.whatsappTemplates.find(t => t._id.toString() === req.params.id || t.templateId === req.params.id);
     if (!template) return res.status(404).json({ message: 'Template not found' });
 
     const apiResult = await whatsappUtils.updateWhatsappTemplate(school, template.templateId, req.body);
@@ -277,15 +279,71 @@ async function updateWhatsappTemplate(req, res, next) {
 async function deleteWhatsappTemplate(req, res, next) {
   try {
     const school = await authService.getSchoolById(req.user.id);
-    const template = school.whatsappTemplates.id(req.params.id);
-    if (!template) return res.status(404).json({ message: 'Template not found' });
-
-    await whatsappUtils.deleteWhatsappTemplate(school, template.name);
+    const templateIndex = school.whatsappTemplates.findIndex(t => t._id.toString() === req.params.id || t.templateId === req.params.id);
     
-    school.whatsappTemplates.pull(req.params.id);
-    await school.save();
+    let templateName;
+    if (templateIndex !== -1) {
+      templateName = school.whatsappTemplates[templateIndex].name;
+      school.whatsappTemplates.splice(templateIndex, 1);
+      await school.save();
+    } else {
+      // If not in our DB, we might still want to allow deleting from Meta if we have the name
+      // For now, let's assume if it's not in our DB and they passed an ID, we can't easily get the name 
+      // unless we fetch from Meta first or the frontend passes the name.
+      // But usually, templates fetched from Meta will be deleted by name.
+      return res.status(404).json({ message: 'Template not found in local database' });
+    }
 
+    await whatsappUtils.deleteWhatsappTemplate(school, templateName);
+    
     return sendSuccess(res, { message: 'WhatsApp template deleted successfully' });
+  } catch (err) {
+    next(err);
+  }
+}
+async function syncWhatsappTemplates(req, res, next) {
+  try {
+    const school = await authService.getSchoolById(req.user.id);
+    const metaRes = await whatsappUtils.getWhatsappTemplates(school, 100, 0);
+    
+    if (!metaRes || !metaRes.data) {
+      return sendSuccess(res, { message: 'No templates found on Meta to sync' });
+    }
+
+    let syncCount = 0;
+    const metaTemplates = metaRes.data;
+
+    metaTemplates.forEach(mt => {
+      // Find components
+      const bodyComp = mt.components?.find(c => c.type === 'BODY');
+      const headerComp = mt.components?.find(c => c.type === 'HEADER');
+      const footerComp = mt.components?.find(c => c.type === 'FOOTER');
+
+      const templateData = {
+        templateId: mt.id,
+        name: mt.name,
+        category: mt.category,
+        language: mt.language,
+        status: mt.status,
+        body: bodyComp?.text || '',
+        header: headerComp ? { type: 'TEXT', text: headerComp.text } : { type: 'NONE', text: '' },
+        footer: footerComp?.text || ''
+      };
+
+      // Check if exists locally
+      const existingIdx = school.whatsappTemplates.findIndex(t => t.name === mt.name);
+      if (existingIdx > -1) {
+        // Update existing
+        Object.assign(school.whatsappTemplates[existingIdx], templateData);
+      } else {
+        // Add new
+        school.whatsappTemplates.push(templateData);
+      }
+      syncCount++;
+    });
+
+    await school.save();
+    return sendSuccess(res, { message: `Successfully synced ${syncCount} templates from Meta`, count: syncCount });
   } catch (err) {
     next(err);
   }
@@ -294,17 +352,10 @@ async function deleteWhatsappTemplate(req, res, next) {
 async function getWhatsappTemplates(req, res, next) {
   try {
     const school = await authService.getSchoolById(req.user.id);
-    const { limit, offset } = req.query;
-    const apiResult = await whatsappUtils.getWhatsappTemplates(school, limit, offset);
-    return sendSuccess(res, { data: apiResult });
+    // Sort by newest first
+    const templates = [...school.whatsappTemplates].reverse();
+    return sendSuccess(res, { data: templates });
   } catch (err) {
-    console.error('WhatsApp API Error:', err.response?.data || err.message);
-    if (err.response?.status === 400 || err.response?.status === 401) {
-      return res.status(err.response.status).json({ 
-        success: false, 
-        message: err.response.data?.error?.message || 'WhatsApp API configuration error' 
-      });
-    }
     next(err);
   }
 }
@@ -315,5 +366,5 @@ module.exports = {
   updateReminderSettings, updateOverdueRules, updateOverdueRepeatRule,
   updateEmailConfig, testEmailConfig,
   updateWhatsappConfig,
-  createWhatsappTemplate, updateWhatsappTemplate, deleteWhatsappTemplate, getWhatsappTemplates,
+  createWhatsappTemplate, updateWhatsappTemplate, deleteWhatsappTemplate, getWhatsappTemplates, syncWhatsappTemplates,
 };
