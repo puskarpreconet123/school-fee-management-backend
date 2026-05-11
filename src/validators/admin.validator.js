@@ -95,6 +95,7 @@ const updateWhatsappConfigSchema = Joi.object({
     apiKey:    Joi.string().trim().required(),
     accessToken: Joi.string().trim().required(),
     wabaId:    Joi.string().trim().required(),
+    phoneNumberId: Joi.string().trim().required(),
     apiVersion: Joi.string().trim().required(),
     useCustom: Joi.boolean().default(true),
   }).required(),

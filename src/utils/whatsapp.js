@@ -3,6 +3,7 @@
 const axios = require('axios');
 const logger = require('./logger');
 const AppError = require('./AppError');
+const CommunicationLog = require('../models/CommunicationLog');
 
 /**
  * Internal helper to resolve WhatsApp configuration for a school.
@@ -17,12 +18,13 @@ function getWhatsappConfig(school) {
 
   // 2. Platform defaults
   const platformCfg = {
-    apiUrl: process.env.WHATSAPP_DEFAULT_API_URL || 'https://api.brandmo.ai/crm/campaign',
+    apiUrl: process.env.WHATSAPP_DEFAULT_API_URL,
     channelId: process.env.WHATSAPP_DEFAULT_CHANNEL_ID,
     apiKey: process.env.WHATSAPP_DEFAULT_API_KEY,
     accessToken: process.env.WHATSAPP_DEFAULT_ACCESS_TOKEN,
     wabaId: process.env.WHATSAPP_DEFAULT_WABA_ID,
-    apiVersion: process.env.WHATSAPP_DEFAULT_API_VERSION || 'v20.0',
+    phoneNumberId: process.env.WHATSAPP_DEFAULT_PHONE_NUMBER_ID,
+    apiVersion: process.env.WHATSAPP_DEFAULT_API_VERSION,
   };
 
   if (platformCfg.channelId && platformCfg.apiKey && platformCfg.accessToken) {
@@ -49,15 +51,23 @@ function handleAxiosError(err, context = 'WhatsApp API') {
   return err;
 }
 
-/**
- * Common headers for WhatsApp API calls.
- */
 function getHeaders(cfg) {
   return {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${cfg.accessToken}`,
     'x-api-key': cfg.apiKey
   };
+}
+
+/**
+ * Strips paths to get base Brandmo/Meta domain.
+ */
+function getBaseUrl(cfg) {
+  if (!cfg.apiUrl) return '';
+  return cfg.apiUrl
+    .replace(/\/+$/, '')
+    .replace(/\/crm\/campaign\/?$/, '')
+    .replace(/\/api\/meta\/?.*$/, '');
 }
 
 /**
@@ -88,15 +98,50 @@ function getComponentExample(text, type) {
 async function sendWhatsappFromSchool(school, { to, message, studentName }) {
   const cfg = getWhatsappConfig(school);
   if (!cfg) {
-    logger.warn('WhatsApp not configured for school', { schoolId: school?._id });
-    return null;
+    throw new AppError('WhatsApp not configured for school', 400);
   }
 
+  let url, payload;
   try {
     let phoneNumber = to.replace(/\D/g, '');
-    if (phoneNumber.length === 10) phoneNumber = '91' + phoneNumber;
+    // Remove leading 0 if present (common in some contact formats)
+    if (phoneNumber.startsWith('0')) {
+      phoneNumber = phoneNumber.substring(1);
+    }
+    // Prepend 91 if it's a 10-digit number
+    if (phoneNumber.length === 10) {
+      phoneNumber = '91' + phoneNumber;
+    }
 
-    const payload = {
+    const baseUrl = getBaseUrl(cfg);
+    // Use Meta messages API if phoneNumberId is available, else fallback to crm/campaign
+    const isMeta = !!cfg.phoneNumberId;
+    url = isMeta 
+      ? `${baseUrl}/api/meta/${cfg.apiVersion}/${cfg.phoneNumberId}/messages`
+      : `${baseUrl}/crm/campaign`;
+
+    payload = isMeta ? {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: phoneNumber,
+      type: "template",
+      template: {
+        language: {
+          policy: "deterministic",
+          code: "en"
+        },
+        name: "standard_template",
+        components: [
+          {
+            type: "body",
+            parameters: [
+              { type: "text", text: studentName || "Student" },
+              { type: "text", text: message } // Using message as the second parameter
+            ]
+          }
+        ]
+      }
+    } : {
       receivers: [phoneNumber],
       title: `Message for ${studentName}`,
       channel: cfg.channelId,
@@ -116,15 +161,40 @@ async function sendWhatsappFromSchool(school, { to, message, studentName }) {
       }]
     };
 
-    const response = await axios.post(cfg.apiUrl, payload, {
+    const response = await axios.post(url, payload, {
       headers: getHeaders(cfg)
     });
 
-    logger.info('WhatsApp sent (Brandmo.ai)', { schoolId: school._id, to: phoneNumber });
+    // Save successful log
+    await CommunicationLog.create({
+      schoolId: school._id,
+      channel: 'whatsapp',
+      recipient: phoneNumber,
+      payload,
+      response: response.data,
+      status: 'success',
+      metadata: { mode: isMeta ? 'Meta' : 'Legacy', url }
+    }).catch(e => logger.error('Failed to save communication log', e));
+
+    logger.info('WhatsApp sent', { schoolId: school._id, to: phoneNumber, mode: isMeta ? 'Meta' : 'Legacy' });
     return response.data;
   } catch (err) {
-    logger.error('WhatsApp send failed (Brandmo.ai)', { error: err.response?.data || err.message, schoolId: school._id });
-    return null; 
+    const errorBody = err.response?.data || err.message;
+    
+    // Save failure log
+    await CommunicationLog.create({
+      schoolId: school._id,
+      channel: 'whatsapp',
+      recipient: to,
+      payload: typeof payload !== 'undefined' ? payload : { to },
+      response: err.response?.data || null,
+      status: 'failure',
+      error: errorBody,
+      metadata: { url: typeof url !== 'undefined' ? url : null }
+    }).catch(e => logger.error('Failed to save communication log', e));
+
+    logger.error('WhatsApp send failed', { error: errorBody, schoolId: school._id });
+    throw handleAxiosError(err, 'WhatsApp Send');
   }
 }
 
@@ -162,7 +232,7 @@ async function createWhatsappTemplate(school, templateData) {
     components
   };
 
-  const baseUrl = cfg.apiUrl.replace(/\/+$/, '').replace(/\/crm\/campaign\/?$/, '').replace(/\/api\/meta\/?.*$/, '');
+  const baseUrl = getBaseUrl(cfg);
   const url = `${baseUrl}/api/meta/${cfg.apiVersion}/${cfg.wabaId}/message_templates`;
 
   try {
@@ -198,7 +268,7 @@ async function updateWhatsappTemplate(school, templateId, templateData) {
   }
 
   const payload = { components };
-  const baseUrl = cfg.apiUrl.replace(/\/+$/, '').replace(/\/crm\/campaign\/?$/, '').replace(/\/api\/meta\/?.*$/, '');
+  const baseUrl = getBaseUrl(cfg);
   const url = `${baseUrl}/api/meta/${cfg.apiVersion}/${templateId}`;
 
   try {
@@ -215,7 +285,7 @@ async function deleteWhatsappTemplate(school, templateName) {
   const cfg = getWhatsappConfig(school);
   if (!cfg || !cfg.wabaId) throw new AppError('WhatsApp not configured or missing WABA ID', 400);
 
-  const baseUrl = cfg.apiUrl.replace(/\/+$/, '').replace(/\/crm\/campaign\/?$/, '').replace(/\/api\/meta\/?.*$/, '');
+  const baseUrl = getBaseUrl(cfg);
   const url = `${baseUrl}/api/meta/${cfg.apiVersion}/${cfg.wabaId}/message_templates?name=${templateName}`;
 
   try {
@@ -232,7 +302,7 @@ async function getWhatsappTemplates(school, limit = 10, offset = 0) {
   const cfg = getWhatsappConfig(school);
   if (!cfg || !cfg.wabaId) throw new AppError('WhatsApp not configured or missing WABA ID', 400);
 
-  const baseUrl = cfg.apiUrl.replace(/\/+$/, '').replace(/\/crm\/campaign\/?$/, '').replace(/\/api\/meta\/?.*$/, '');
+  const baseUrl = getBaseUrl(cfg);
   const url = `${baseUrl}/api/meta/${cfg.apiVersion}/${cfg.wabaId}/message_templates?limit=${limit}&offset=${offset}`;
 
   try {

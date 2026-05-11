@@ -81,10 +81,10 @@ async function getMyCredits(req, res, next) {
 }
 
 // POST /api/v1/admin/communicate
-// Body: { channel: 'sms'|'whatsapp'|'call', studentIds: [...] | 'all', message: '...' }
+// Body: { channel: 'sms'|'whatsapp'|'call', studentIds: [...] | 'all', message: '...', messages: { sms: '...', email: { subject: '...', html: '...' }, whatsapp: 'template_name' } }
 async function communicate(req, res, next) {
   try {
-    const { channels, channel: legacyChannel, message, target, studentIds: legacyStudentIds } = req.body;
+    const { channels, channel: legacyChannel, message, messages, target, studentIds: legacyStudentIds } = req.body;
     const schoolId = req.user.id;
 
     // Normalize channels
@@ -93,8 +93,8 @@ async function communicate(req, res, next) {
       return next(new AppError('At least one channel is required', 400));
     }
     
-    if (!message || !message.trim()) {
-      return next(new AppError('message is required', 400));
+    if (!message && !messages) {
+      return next(new AppError('message or messages object is required', 400));
     }
 
     // Resolve target
@@ -153,6 +153,9 @@ async function communicate(req, res, next) {
     }
 
     for (const ch of activeChannels) {
+      // Get the message content for this specific channel
+      let channelMessage = (messages && messages[ch]) ? messages[ch] : message;
+
       // debit() handles email (free) and per-channel pricing internally
       const { balance, cost } = await creditService.debit(
         schoolId,
@@ -165,7 +168,7 @@ async function communicate(req, res, next) {
       // Enqueue communication jobs
       await queue.add('bulk-communicate', {
         channel: ch,
-        message: message.trim(),
+        message: channelMessage,
         schoolId: schoolId.toString(),
         schoolName: school?.name || 'School',
         students: students.map((s) => {

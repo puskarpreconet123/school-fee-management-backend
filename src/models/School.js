@@ -108,6 +108,9 @@ const schoolSchema = new mongoose.Schema(
             default: ['sms'],
             required: true,
           },
+          campaignTemplateId: {
+            type: mongoose.Schema.Types.ObjectId,
+          },
           _id: false,
         },
       ],
@@ -149,6 +152,9 @@ const schoolSchema = new mongoose.Schema(
             default: ['sms'],
             required: true,
           },
+          campaignTemplateId: {
+            type: mongoose.Schema.Types.ObjectId,
+          },
           _id: false,
         },
       ],
@@ -185,6 +191,7 @@ const schoolSchema = new mongoose.Schema(
         apiKey: { type: String, trim: true },
         accessToken: { type: String, trim: true },
         wabaId: { type: String, trim: true },
+        phoneNumberId: { type: String, trim: true },
         apiVersion: { type: String, trim: true },
         useCustom: { type: Boolean, default: false },
       },
@@ -212,6 +219,20 @@ const schoolSchema = new mongoose.Schema(
       default: []
     },
 
+    campaignTemplates: {
+      type: [
+        {
+          name: { type: String, required: true },
+          smsBody: { type: String, default: '' },
+          emailSubject: { type: String, default: '' },
+          emailBody: { type: String, default: '' },
+          whatsappTemplateName: { type: String, default: '' },
+          voiceBody: { type: String, default: '' },
+        }
+      ],
+      default: []
+    },
+
     // Repeats every N days after due date until paid or manually stopped
     overdueRepeatRule: {
       type: {
@@ -231,6 +252,9 @@ const schoolSchema = new mongoose.Schema(
           type: [String],
           enum: ['sms', 'whatsapp', 'call', 'email'],
           default: ['sms'],
+        },
+        campaignTemplateId: {
+          type: mongoose.Schema.Types.ObjectId,
         },
       },
       default: null,

@@ -132,6 +132,35 @@ router.delete(
   adminController.deleteWhatsappTemplate
 );
 
+// Campaign Template Routes
+router.get(
+  '/me/campaign-templates',
+  authenticate,
+  authorize('admin'),
+  adminController.getCampaignTemplates
+);
+
+router.post(
+  '/me/campaign-templates',
+  authenticate,
+  authorize('admin'),
+  adminController.createCampaignTemplate
+);
+
+router.patch(
+  '/me/campaign-templates/:id',
+  authenticate,
+  authorize('admin'),
+  adminController.updateCampaignTemplate
+);
+
+router.delete(
+  '/me/campaign-templates/:id',
+  authenticate,
+  authorize('admin'),
+  adminController.deleteCampaignTemplate
+);
+
 // Credits & Communications
 router.get('/credits', authenticate, authorize('admin'), creditController.getMyCredits);
 router.post('/communicate', authenticate, authorize('admin'), creditController.communicate);

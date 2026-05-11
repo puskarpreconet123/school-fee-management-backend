@@ -32,6 +32,7 @@ async function getProfile(req, res, next) {
     const whatsappDefaults = {
       apiVersion: process.env.WHATSAPP_DEFAULT_API_VERSION || 'v20.0',
       wabaId: process.env.WHATSAPP_DEFAULT_WABA_ID || '',
+      phoneNumberId: process.env.WHATSAPP_DEFAULT_PHONE_NUMBER_ID || '',
       apiUrl: process.env.WHATSAPP_DEFAULT_API_URL || 'https://api.brandmo.ai/crm/campaign',
       channelId: process.env.WHATSAPP_DEFAULT_CHANNEL_ID || '',
       apiKey: process.env.WHATSAPP_DEFAULT_API_KEY || '',
@@ -242,6 +243,11 @@ async function updateWhatsappConfig(req, res, next) {
 }
 async function createWhatsappTemplate(req, res, next) {
   try {
+    const { name } = req.body;
+    if (!name || !/^[a-z0-9_]+$/.test(name)) {
+      return res.status(400).json({ message: 'Template name can only contain lowercase letters, numbers, and underscores (no spaces or other special characters).' });
+    }
+
     const school = await authService.getSchoolById(req.user.id);
     const apiResult = await whatsappUtils.createWhatsappTemplate(school, req.body);
     
@@ -279,23 +285,36 @@ async function updateWhatsappTemplate(req, res, next) {
 async function deleteWhatsappTemplate(req, res, next) {
   try {
     const school = await authService.getSchoolById(req.user.id);
-    const templateIndex = school.whatsappTemplates.findIndex(t => t._id.toString() === req.params.id || t.templateId === req.params.id);
+    const templateIndex = school.whatsappTemplates.findIndex(t => t._id.toString() === req.params.id || t.templateId === req.params.id || t.name === req.params.id);
     
     let templateName;
     if (templateIndex !== -1) {
       templateName = school.whatsappTemplates[templateIndex].name;
-      school.whatsappTemplates.splice(templateIndex, 1);
-      await school.save();
     } else {
-      // If not in our DB, we might still want to allow deleting from Meta if we have the name
-      // For now, let's assume if it's not in our DB and they passed an ID, we can't easily get the name 
-      // unless we fetch from Meta first or the frontend passes the name.
-      // But usually, templates fetched from Meta will be deleted by name.
-      return res.status(404).json({ message: 'Template not found in local database' });
+      templateName = req.query.name || req.params.id;
     }
 
-    await whatsappUtils.deleteWhatsappTemplate(school, templateName);
-    
+    // Call Meta API first to ensure it's deleted there before removing locally
+    if (templateName) {
+      try {
+        await whatsappUtils.deleteWhatsappTemplate(school, templateName);
+      } catch (metaErr) {
+        // If it returns 404, we assume it's already deleted from Meta
+        const status = metaErr.statusCode || metaErr.status || (metaErr.response && metaErr.response.status);
+        if (status !== 404) {
+          throw metaErr;
+        }
+      }
+    }
+
+    // Now delete locally
+    if (templateIndex !== -1) {
+      school.whatsappTemplates.splice(templateIndex, 1);
+      await school.save();
+    } else if (!req.query.name && templateName === req.params.id && !templateName) {
+      return res.status(404).json({ message: 'Template not found' });
+    }
+
     return sendSuccess(res, { message: 'WhatsApp template deleted successfully' });
   } catch (err) {
     next(err);
@@ -360,6 +379,56 @@ async function getWhatsappTemplates(req, res, next) {
   }
 }
 
+async function getCampaignTemplates(req, res, next) {
+  try {
+    const school = await authService.getSchoolById(req.user.id);
+    return sendSuccess(res, { data: school.campaignTemplates || [] });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function createCampaignTemplate(req, res, next) {
+  try {
+    const school = await authService.getSchoolById(req.user.id);
+    school.campaignTemplates.push(req.body);
+    await school.save();
+    return sendCreated(res, { message: 'Campaign template created successfully', data: school.campaignTemplates[school.campaignTemplates.length - 1] });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function updateCampaignTemplate(req, res, next) {
+  try {
+    const school = await authService.getSchoolById(req.user.id);
+    const template = school.campaignTemplates.id(req.params.id);
+    if (!template) {
+      return res.status(404).json({ message: 'Campaign template not found' });
+    }
+    Object.assign(template, req.body);
+    await school.save();
+    return sendSuccess(res, { message: 'Campaign template updated successfully', data: template });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function deleteCampaignTemplate(req, res, next) {
+  try {
+    const school = await authService.getSchoolById(req.user.id);
+    const templateIndex = school.campaignTemplates.findIndex(t => t._id.toString() === req.params.id);
+    if (templateIndex === -1) {
+      return res.status(404).json({ message: 'Campaign template not found' });
+    }
+    school.campaignTemplates.splice(templateIndex, 1);
+    await school.save();
+    return sendSuccess(res, { message: 'Campaign template deleted successfully' });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function changePassword(req, res, next) {
   try {
     await authService.changeSchoolPassword(req.user.id, req.body);
@@ -376,5 +445,6 @@ module.exports = {
   updateEmailConfig, testEmailConfig,
   updateWhatsappConfig,
   createWhatsappTemplate, updateWhatsappTemplate, deleteWhatsappTemplate, getWhatsappTemplates, syncWhatsappTemplates,
+  getCampaignTemplates, createCampaignTemplate, updateCampaignTemplate, deleteCampaignTemplate,
   changePassword,
 };
