@@ -58,6 +58,13 @@ const env = {
     paymentSuccess: process.env.PAYMENT_SUCCESS_URL || 'http://localhost:3000/payment/success',
     paymentFailure: process.env.PAYMENT_FAILURE_URL || 'http://localhost:3000/payment/failure',
   },
+
+  sms: {
+    apiUrl: process.env.SMS_DEFAULT_API_URL,
+    username: process.env.SMS_DEFAULT_USERNAME,
+    password: process.env.SMS_DEFAULT_PASSWORD,
+    senderId: process.env.SMS_DEFAULT_SENDER_ID,
+  },
 };
 
 module.exports = { env, validateEnv };

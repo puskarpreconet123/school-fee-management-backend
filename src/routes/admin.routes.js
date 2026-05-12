@@ -16,6 +16,7 @@ const {
   updateOverdueRepeatRuleSchema, 
   updateEmailConfigSchema, 
   updateWhatsappConfigSchema,
+  updateSMSConfigSchema,
   whatsappTemplateSchema
 } = require('../validators/admin.validator');
 
@@ -92,6 +93,15 @@ router.patch(
   authorize('admin'),
   validate(updateWhatsappConfigSchema),
   adminController.updateWhatsappConfig
+);
+
+// PATCH /api/admin/me/sms-config
+router.patch(
+  '/me/sms-config',
+  authenticate,
+  authorize('admin'),
+  validate(updateSMSConfigSchema),
+  adminController.updateSMSConfig
 );
 
 // WhatsApp Template Routes

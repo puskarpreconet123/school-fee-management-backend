@@ -101,6 +101,16 @@ const updateWhatsappConfigSchema = Joi.object({
   }).required(),
 });
 
+const updateSMSConfigSchema = Joi.object({
+  smsConfig: Joi.object({
+    apiUrl:    Joi.string().uri().trim().required(),
+    username:  Joi.string().trim().required(),
+    password:  Joi.string().required(),
+    senderId:  Joi.string().trim().max(6).required(),
+    useCustom: Joi.boolean().default(true),
+  }).required(),
+});
+
 const whatsappTemplateSchema = Joi.object({
   name: Joi.string().trim().required(),
   category: Joi.string().valid('MARKETING', 'UTILITY', 'AUTHENTICATION').default('MARKETING'),
@@ -123,5 +133,6 @@ module.exports = {
   updateOverdueRepeatRuleSchema,
   updateEmailConfigSchema,
   updateWhatsappConfigSchema,
+  updateSMSConfigSchema,
   whatsappTemplateSchema,
 };

@@ -5,6 +5,7 @@ const { createBullMQConnection } = require('../../config/redis');
 const { env } = require('../../config/env');
 const { sendMailFromSchool } = require('../../utils/mailer');
 const { sendWhatsappFromSchool } = require('../../utils/whatsapp');
+const { sendSMSFromSchool } = require('../../utils/sms');
 const logger = require('../../utils/logger');
 
 /**
@@ -28,9 +29,9 @@ function startCommunicateWorker() {
 
       // Load school once for config resolution
       let school = null;
-      if (['email', 'whatsapp'].includes(channel) && schoolId) {
+      if (['email', 'whatsapp', 'sms'].includes(channel) && schoolId) {
         const School = require('../../models/School');
-        school = await School.findById(schoolId).select('name emailConfig whatsappConfig');
+        school = await School.findById(schoolId).select('name emailConfig whatsappConfig smsConfig campaignTemplates');
       }
 
       for (const student of students) {
@@ -71,8 +72,28 @@ function startCommunicateWorker() {
               studentName: student.name
             });
             logger.info('WhatsApp sent to student', { studentId: student.id, to: student.phone });
+          } else if (channel === 'sms') {
+            if (!student.phone) {
+              logger.warn('Student has no phone number, skipping', { studentId: student.id });
+              continue;
+            }
+            
+            // Try to resolve dltContentId if available from school/campaign
+            let dltContentId = '';
+            const campaignTemplateId = job.data.campaignTemplateId;
+            if (campaignTemplateId && school?.campaignTemplates) {
+              const template = school.campaignTemplates.id(campaignTemplateId);
+              if (template) dltContentId = template.dltContentId;
+            }
+
+            await sendSMSFromSchool(school, {
+              to: student.phone,
+              message: personalizedMsg,
+              dltContentId
+            });
+            logger.info('SMS sent to student', { studentId: student.id, to: student.phone });
           } else {
-            // STUB for SMS / Call
+            // STUB for Call
             logger.info(`[STUB] ${channel.toUpperCase()} sent`, {
               to:      student.phone,
               name:    student.name,

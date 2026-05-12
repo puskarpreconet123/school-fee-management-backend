@@ -48,7 +48,14 @@ async function getProfile(req, res, next) {
       from: process.env.SMTP_FROM || '',
     };
 
-    return sendSuccess(res, { data: { ...school.toObject(), whatsappDefaults, emailDefaults } });
+    const smsDefaults = {
+      apiUrl: process.env.SMS_DEFAULT_API_URL || '',
+      username: process.env.SMS_DEFAULT_USERNAME || '',
+      password: process.env.SMS_DEFAULT_PASSWORD || '',
+      senderId: process.env.SMS_DEFAULT_SENDER_ID || 'NOTICE',
+    };
+
+    return sendSuccess(res, { data: { ...school.toObject(), whatsappDefaults, emailDefaults, smsDefaults } });
   } catch (err) {
     next(err);
   }
@@ -237,6 +244,25 @@ async function updateWhatsappConfig(req, res, next) {
     if (!school) throw new Error('School not found');
 
     return sendSuccess(res, { message: 'WhatsApp settings updated', data: school.whatsappConfig });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function updateSMSConfig(req, res, next) {
+  try {
+    const School = require('../models/School');
+    const { smsConfig } = req.body;
+
+    const school = await School.findByIdAndUpdate(
+      req.user.id,
+      { $set: { smsConfig } },
+      { new: true, runValidators: true }
+    ).select('smsConfig');
+
+    if (!school) throw new Error('School not found');
+
+    return sendSuccess(res, { message: 'SMS settings updated', data: school.smsConfig });
   } catch (err) {
     next(err);
   }
@@ -443,7 +469,7 @@ module.exports = {
   updatePaymentProviders, getPayments,
   updateReminderSettings, updateOverdueRules, updateOverdueRepeatRule,
   updateEmailConfig, testEmailConfig,
-  updateWhatsappConfig,
+  updateWhatsappConfig, updateSMSConfig,
   createWhatsappTemplate, updateWhatsappTemplate, deleteWhatsappTemplate, getWhatsappTemplates, syncWhatsappTemplates,
   getCampaignTemplates, createCampaignTemplate, updateCampaignTemplate, deleteCampaignTemplate,
   changePassword,

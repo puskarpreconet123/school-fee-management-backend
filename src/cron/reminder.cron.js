@@ -72,7 +72,7 @@ async function enqueueFeeReminders() {
           const rule = rules.find((r) => r.daysBefore === daysUntilDue);
           if (!rule) { skipped++; continue; }
 
-          const jobData = _buildJobData({ fee, student, school, daysUntilDue, channels: rule.channels });
+          const jobData = _buildJobData({ fee, student, school, daysUntilDue, channels: rule.channels, campaignTemplateId: rule.campaignTemplateId });
           const spreadMs = rule.timesPerDay > 1 ? (8 * MS_PER_HOUR) / (rule.timesPerDay - 1) : 0;
 
           for (let i = 0; i < rule.timesPerDay; i++) {
@@ -92,7 +92,7 @@ async function enqueueFeeReminders() {
           // 1. Exact daysAfter rules (always fire regardless of enabled flag)
           const exactRule = (school.overdueRules || []).find((r) => r.daysAfter === daysOverdue);
           if (exactRule) {
-            const jobData = _buildJobData({ fee, student, school, daysUntilDue: 0, daysOverdue, channels: exactRule.channels });
+            const jobData = _buildJobData({ fee, student, school, daysUntilDue: 0, daysOverdue, channels: exactRule.channels, campaignTemplateId: exactRule.campaignTemplateId });
             const spreadMs = exactRule.timesPerDay > 1 ? (8 * MS_PER_HOUR) / (exactRule.timesPerDay - 1) : 0;
             for (let i = 0; i < exactRule.timesPerDay; i++) {
               for (const channel of exactRule.channels) {
@@ -109,7 +109,7 @@ async function enqueueFeeReminders() {
           // 2. Continuous repeat rule — fires every N days until paid or stopped
           const repeatRule = school.overdueRepeatRule;
           if (repeatRule && fee.overdueReminderEnabled !== false && daysOverdue % repeatRule.intervalDays === 0) {
-            const jobData = _buildJobData({ fee, student, school, daysUntilDue: 0, daysOverdue, channels: repeatRule.channels });
+            const jobData = _buildJobData({ fee, student, school, daysUntilDue: 0, daysOverdue, channels: repeatRule.channels, campaignTemplateId: repeatRule.campaignTemplateId });
             const spreadMs = repeatRule.timesPerDay > 1 ? (8 * MS_PER_HOUR) / (repeatRule.timesPerDay - 1) : 0;
             for (let i = 0; i < repeatRule.timesPerDay; i++) {
               for (const channel of repeatRule.channels) {
@@ -139,7 +139,7 @@ async function enqueueFeeReminders() {
   }
 }
 
-function _buildJobData({ fee, student, school, daysUntilDue, daysOverdue, channels }) {
+function _buildJobData({ fee, student, school, daysUntilDue, daysOverdue, channels, campaignTemplateId }) {
   return {
     feeId:                    fee._id.toString(),
     studentId:                student._id.toString(),
@@ -155,6 +155,7 @@ function _buildJobData({ fee, student, school, daysUntilDue, daysOverdue, channe
     daysUntilDue:             Math.max(daysUntilDue, 0),
     daysOverdue:              daysOverdue || 0,
     reminderMessageTemplate: school.reminderMessageTemplate,
+    campaignTemplateId:       campaignTemplateId ? campaignTemplateId.toString() : null,
   };
 }
 

@@ -198,6 +198,18 @@ const schoolSchema = new mongoose.Schema(
       default: null,
       _id: false,
     },
+
+    smsConfig: {
+      type: {
+        username: { type: String, trim: true },
+        password: { type: String },
+        senderId: { type: String, trim: true }, // 'from' in the API
+        apiUrl: { type: String, trim: true },
+        useCustom: { type: Boolean, default: false },
+      },
+      default: null,
+      _id: false,
+    },
     
     whatsappTemplates: {
       type: [
@@ -224,6 +236,7 @@ const schoolSchema = new mongoose.Schema(
         {
           name: { type: String, required: true },
           smsBody: { type: String, default: '' },
+          dltContentId: { type: String, default: '' },
           emailSubject: { type: String, default: '' },
           emailBody: { type: String, default: '' },
           whatsappTemplateName: { type: String, default: '' },

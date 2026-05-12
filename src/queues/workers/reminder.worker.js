@@ -4,6 +4,8 @@ const { Worker } = require('bullmq');
 const { createBullMQConnection } = require('../../config/redis');
 const { env } = require('../../config/env');
 const { sendMailFromSchool } = require('../../utils/mailer');
+const { sendSMSFromSchool } = require('../../utils/sms');
+const { sendWhatsappFromSchool } = require('../../utils/whatsapp');
 const logger = require('../../utils/logger');
 
 /**
@@ -73,12 +75,24 @@ async function processReminderJob(job) {
     logger.info('Email reminder sent', { feeId, to: studentEmail });
 
   } else if (channel === 'sms' && studentPhone) {
-    logger.info('[SMS REMINDER]', { to: studentPhone, message: text });
-    // TODO: integrate SMS provider (MSG91 / Twilio)
+    const School = require('../../models/School');
+    const school = await School.findById(schoolId).select('smsConfig campaignTemplates');
+    
+    let dltContentId = '';
+    if (job.data.campaignTemplateId && school?.campaignTemplates) {
+      const template = school.campaignTemplates.id(job.data.campaignTemplateId);
+      if (template) dltContentId = template.dltContentId;
+    }
+
+    await sendSMSFromSchool(school, { to: studentPhone, message: text, dltContentId });
+    logger.info('SMS reminder sent', { feeId, to: studentPhone });
 
   } else if (channel === 'whatsapp' && studentPhone) {
-    logger.info('[WHATSAPP REMINDER]', { to: studentPhone, message: text });
-    // TODO: integrate WhatsApp provider
+    const School = require('../../models/School');
+    const school = await School.findById(schoolId).select('name whatsappConfig');
+
+    await sendWhatsappFromSchool(school, { to: studentPhone, message: text, studentName });
+    logger.info('WhatsApp reminder sent', { feeId, to: studentPhone });
 
   } else if (channel === 'call' && studentPhone) {
     logger.info('[CALL REMINDER]', { to: studentPhone, message: text });
