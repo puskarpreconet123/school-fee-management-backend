@@ -17,6 +17,14 @@ router.get(
   feeController.listForSchool
 );
 
+// GET /api/fees/installments  — admin only
+router.get(
+  '/installments',
+  authenticate,
+  authorize('admin'),
+  feeController.getInstallmentsTracking
+);
+
 // POST /api/fees  — admin only
 router.post(
   '/',
@@ -58,6 +66,22 @@ router.patch(
   authenticate,
   authorize('admin'),
   feeController.toggleOverdueReminder
+);
+
+// PATCH /api/fees/:feeId  — admin only
+router.patch(
+  '/:feeId',
+  authenticate,
+  authorize('admin'),
+  feeController.update
+);
+
+// POST /api/fees/rebalance/:studentId — admin only
+router.post(
+  '/rebalance/:studentId',
+  authenticate,
+  authorize('admin'),
+  feeController.rebalance
 );
 
 module.exports = router;

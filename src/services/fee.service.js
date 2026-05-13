@@ -8,7 +8,7 @@ const AppError = require('../utils/AppError');
 const logger = require('../utils/logger');
 
 async function createFee(schoolId, data) {
-  const { studentId, className, amount, dueDate, title, description, type, endDate, dueDay } = data;
+  const { studentId, className, amount, dueDate, title, description, type, installmentsCount, dueDay } = data;
 
   // 1. Identify Target Students
   let students = [];
@@ -26,18 +26,17 @@ async function createFee(schoolId, data) {
   // 2. Determine Timeframes
   const timeframes = [];
   if (type === 'periodic') {
-    if (!endDate || !dueDay) throw new AppError('End date and Due Day are required for periodic fees', 400);
+    if (!installmentsCount || !dueDay) throw new AppError('Installment count and Due Day are required for periodic fees', 400);
     
     const start = new Date();
-    const end = new Date(endDate);
-    
     const current = new Date(start.getFullYear(), start.getMonth(), 1);
-    while (current <= end) {
+    
+    for (let i = 0; i < installmentsCount; i++) {
       // Calculate due date for the month
       const year = current.getFullYear();
       const month = current.getMonth();
       
-      // Handle day clamping (e.g. 31st of Feb -> 28th)
+      // Handle day clamping
       const lastDay = new Date(year, month + 1, 0).getDate();
       const actualDay = Math.min(dueDay, lastDay);
       const calculatedDueDate = new Date(year, month, actualDay);
@@ -45,7 +44,7 @@ async function createFee(schoolId, data) {
       const monthName = current.toLocaleString('default', { month: 'long' });
       timeframes.push({
         dueDate: calculatedDueDate,
-        title: `${title} — ${monthName} ${year}`
+        title: installmentsCount === 1 ? title : `${title} — ${monthName} ${year}`
       });
 
       // Move to next month
@@ -146,6 +145,8 @@ async function updateFeeStatus(feeId, status, extra = {}) {
   const update = { $set: { status, ...extra } };
   if (status === FeeStatus.PAID) {
     update.$set.paidAt = extra.paidAt || new Date();
+    const existingFee = await Fee.findById(feeId);
+    if (existingFee) update.$set.paidAmount = existingFee.amount;
   }
 
   const fee = await Fee.findByIdAndUpdate(feeId, update, { new: true });
@@ -192,6 +193,190 @@ async function _markOverdue(schoolId) {
   );
 }
 
+async function getInstallmentsTracking(schoolId, { page = 1, limit = 15, search, className } = {}) {
+  // 1. Build Student Filter
+  const studentFilter = { schoolId, isActive: true };
+  if (search) {
+    studentFilter.$or = [
+      { name: { $regex: search, $options: 'i' } },
+      { studentId: { $regex: search, $options: 'i' } },
+    ];
+  }
+  if (className) studentFilter.class = className;
+
+  // 2. Fetch Students (Paginated)
+  const skip = (page - 1) * limit;
+  const students = await Student.find(studentFilter)
+    .select('name studentId class section')
+    .sort({ name: 1 })
+    .skip(skip)
+    .limit(Number(limit));
+
+  const totalStudents = await Student.countDocuments(studentFilter);
+
+  // 3. Aggregate Fees for these students
+  const studentIds = students.map(s => s._id);
+  const aggregations = await Fee.aggregate([
+    { $match: { studentId: { $in: studentIds } } },
+    {
+      $group: {
+        _id: '$studentId',
+        totalAmount: { $sum: '$amount' },
+        paidAmount: { 
+          $sum: { 
+            $cond: [
+              { $eq: ['$status', FeeStatus.PAID] }, 
+              '$amount', 
+              { $ifNull: ['$paidAmount', 0] }
+            ] 
+          } 
+        },
+        pendingAmount: {
+          $sum: {
+            $cond: [
+              { $in: ['$status', [FeeStatus.UNPAID, FeeStatus.OVERDUE, FeeStatus.PARTIALLY_PAID]] },
+              { $subtract: ['$amount', { $ifNull: ['$paidAmount', 0] }] },
+              0
+            ]
+          }
+        },
+        installmentCount: { $sum: 1 },
+        paidCount: {
+          $sum: { $cond: [{ $eq: ['$status', FeeStatus.PAID] }, 1, 0] }
+        },
+        overdueCount: {
+          $sum: { $cond: [{ $eq: ['$status', FeeStatus.OVERDUE] }, 1, 0] }
+        }
+      }
+    }
+  ]);
+
+  // Map aggregations back to students
+  const aggMap = aggregations.reduce((acc, curr) => {
+    acc[curr._id.toString()] = curr;
+    return acc;
+  }, {});
+
+  const data = students.map(s => {
+    const agg = aggMap[s._id.toString()] || {
+      totalAmount: 0,
+      paidAmount: 0,
+      pendingAmount: 0,
+      installmentCount: 0,
+      paidCount: 0,
+      overdueCount: 0
+    };
+    return {
+      ...s.toObject(),
+      ...agg
+    };
+  });
+
+  return {
+    data,
+    meta: {
+      page: Number(page),
+      limit: Number(limit),
+      total: totalStudents,
+      pages: Math.ceil(totalStudents / limit)
+    }
+  };
+}
+
+async function updateFee(feeId, schoolId, data) {
+  const { amount, title, dueDate, description, status } = data;
+  
+  const existing = await Fee.findOne({ _id: feeId, schoolId });
+  if (!existing) throw new AppError('Fee not found', 404);
+
+  if (existing.status === FeeStatus.PAID && amount !== undefined && amount !== existing.amount) {
+    throw new AppError('Cannot change the amount of a PAID installment. Please mark it as unpaid first.', 400);
+  }
+
+  const update = { $set: {} };
+
+  if (amount !== undefined) {
+    update.$set.amount = amount;
+    update.$set.amountInPaise = Math.round(amount * 100);
+  }
+  if (title !== undefined) update.$set.title = title;
+  if (dueDate !== undefined) update.$set.dueDate = new Date(dueDate);
+  if (description !== undefined) update.$set.description = description;
+  if (status !== undefined) {
+    update.$set.status = status;
+    if (status === FeeStatus.PAID) {
+      update.$set.paidAt = new Date();
+      // Ensure paidAmount is synced with amount
+      const targetAmount = amount !== undefined ? amount : (await Fee.findById(feeId))?.amount;
+      if (targetAmount !== undefined) update.$set.paidAmount = targetAmount;
+    }
+  }
+
+  const fee = await Fee.findOneAndUpdate(
+    { _id: feeId, schoolId },
+    update,
+    { new: true, runValidators: true }
+  );
+
+  if (!fee) throw new AppError('Fee not found', 404);
+  return fee;
+}
+
+async function rebalanceInstallments(schoolId, studentId, { count }) {
+  // 1. Fetch all fees for the student
+  const student = await Student.findOne({ _id: studentId, schoolId });
+  if (!student) throw new AppError('Student not found', 404);
+
+  const allFees = await Fee.find({ studentId, schoolId }).sort({ dueDate: 1 });
+  
+  // 2. Filter UNPAID/OVERDUE
+  const toReplace = allFees.filter(f => [FeeStatus.UNPAID, FeeStatus.OVERDUE].includes(f.status));
+  if (toReplace.length === 0) throw new AppError('No unpaid installments to rebalance', 400);
+
+  // 3. Calculate remaining balance
+  const remainingTotal = toReplace.reduce((sum, f) => sum + (f.amount - (f.paidAmount || 0)), 0);
+  
+  // 4. Get first replaceable fee's base info
+  const baseFee = toReplace[0];
+  const perInstallment = Math.round((remainingTotal / count) * 100) / 100;
+
+  // 5. Delete old ones
+  const toDeleteIds = toReplace.map(f => f._id);
+  await Fee.deleteMany({ _id: { $in: toDeleteIds } });
+
+  // 6. Create new ones
+  const newFees = [];
+  const start = new Date();
+  const current = new Date(start.getFullYear(), start.getMonth(), 1);
+  
+  const cleanTitle = baseFee.title.split(' — ')[0];
+
+  for (let i = 0; i < count; i++) {
+    const year = current.getFullYear();
+    const month = current.getMonth();
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    const actualDay = Math.min(10, lastDay); 
+    const dueDate = new Date(year, month, actualDay);
+    
+    const monthName = current.toLocaleString('default', { month: 'long' });
+
+    newFees.push({
+      schoolId,
+      studentId,
+      amount: perInstallment,
+      amountInPaise: Math.round(perInstallment * 100),
+      dueDate,
+      title: count === 1 ? cleanTitle : `${cleanTitle} — ${monthName} ${year}`,
+      status: FeeStatus.UNPAID,
+      description: `Rebalanced from ${toReplace.length} installments`
+    });
+
+    current.setMonth(current.getMonth() + 1);
+  }
+
+  return await Fee.insertMany(newFees);
+}
+
 module.exports = {
   createFee,
   getFeesForStudent,
@@ -199,4 +384,7 @@ module.exports = {
   getFeeById,
   updateFeeStatus,
   getFeesSummary,
+  getInstallmentsTracking,
+  updateFee,
+  rebalanceInstallments,
 };

@@ -78,4 +78,37 @@ async function toggleOverdueReminder(req, res, next) {
   }
 }
 
-module.exports = { create, listForSchool, listForStudent, getOne, toggleOverdueReminder };
+async function getInstallmentsTracking(req, res, next) {
+  try {
+    const result = await feeService.getInstallmentsTracking(req.user.id, {
+      page: req.query.page,
+      limit: req.query.limit,
+      search: req.query.search,
+      className: req.query.class,
+    });
+
+    return sendSuccess(res, { data: result.data, meta: result.meta });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function update(req, res, next) {
+  try {
+    const fee = await feeService.updateFee(req.params.feeId, req.user.id, req.body);
+    return sendSuccess(res, { message: 'Fee updated', data: fee });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function rebalance(req, res, next) {
+  try {
+    const result = await feeService.rebalanceInstallments(req.user.id, req.params.studentId, req.body);
+    return sendSuccess(res, { message: 'Installments rebalanced', data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { create, listForSchool, listForStudent, getOne, toggleOverdueReminder, getInstallmentsTracking, update, rebalance };
